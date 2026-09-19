@@ -1,0 +1,34 @@
+<nodeDefs>
+  <nodeDef id="controller" nls="ctl">
+    <editors />
+    <sts>
+      <st id="ST" editor="bool" />
+      <st id="GV0" editor="bool" />
+      <st id="GV1" editor="seconds" />
+    </sts>
+    <cmds>
+      <sends />
+      <accepts>
+        <cmd id="QUERY" />
+        <cmd id="DISCOVER" />
+        <cmd id="UPDATE_PROFILE" />
+      </accepts>
+    </cmds>
+  </nodeDef>
+  <nodeDef id="apcswitch" nls="sw">
+    <editors />
+    <sts>
+      <st id="ST" editor="bool" />
+      <st id="GV0" editor="bool" />
+      <st id="GV1" editor="bool" />
+    </sts>
+    <cmds>
+      <sends />
+      <accepts>
+        <cmd id="DON" />
+        <cmd id="DOF" />
+        <cmd id="QUERY" />
+      </accepts>
+    </cmds>
+  </nodeDef>
+</nodeDefs>

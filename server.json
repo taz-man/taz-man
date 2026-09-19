@@ -1,0 +1,39 @@
+{
+  "name": "APCSurge",
+  "docs": "https://github.com/tazzm/APC-PG3x",
+  "type": "python3",
+  "executable": "apc-poly.py",
+  "install": "install.sh",
+  "description": "Confirmed local control for APC PH6U4X32 smart strips",
+  "notice": "Discontinued hardware using a clean-room Ayla LAN implementation. Initial provisioning and LAN-key retrieval are separate prerequisites.",
+  "shortPoll": "15",
+  "longPoll": "300",
+  "testMode": false,
+  "logLevel": "INFO",
+  "profile_version": "0.1.0",
+  "customParams": {
+    "bootstrap_config_path": "data/apc-bootstrap.json",
+    "callback_port": "10275",
+    "command_timeout_seconds": "8",
+    "max_command_attempts": "3"
+  },
+  "credits": [
+    {
+      "title": "APC PH6U4X32 PG3x Plugin",
+      "author": "Local proof of concept",
+      "version": "0.1.0",
+      "date": "September 19, 2026",
+      "source": "https://github.com/tazzm/APC-PG3x",
+      "license": "https://github.com/tazzm/APC-PG3x/blob/main/LICENSE"
+    }
+  ],
+  "store": {
+    "developer": "local",
+    "purchaseOptions": [
+      {
+        "isPerpetual": true,
+        "price": 0
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "apc-ph6u4x32-pg3x"
+version = "0.1.0"
+description = "Native PG3x plugin core for APC PH6U4X32 via Ayla LAN"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.32,<3",
+  "pycryptodome>=3.20,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=6,<7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/apc_pg3x"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]

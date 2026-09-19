@@ -1,0 +1,17 @@
+# Controller
+ND-controller-NAME = APC SurgeArrest Controller
+ST-ctl-ST-NAME = Plugin Online
+ST-ctl-GV0-NAME = Strip Connected
+ST-ctl-GV1-NAME = Last Confirmed Update Age
+CMD-ctl-QUERY-NAME = Query
+CMD-ctl-DISCOVER-NAME = Discover / Reconnect
+CMD-ctl-UPDATE_PROFILE-NAME = Install Profile
+
+# Controllable endpoint
+ND-apcswitch-NAME = APC Controllable Endpoint
+ST-sw-ST-NAME = Confirmed State
+ST-sw-GV0-NAME = Connected
+ST-sw-GV1-NAME = Command Pending
+CMD-sw-DON-NAME = On
+CMD-sw-DOF-NAME = Off
+CMD-sw-QUERY-NAME = Query
