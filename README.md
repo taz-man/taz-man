@@ -10,21 +10,35 @@ Native eisy/PG3x integration for already-provisioned APC PH6U4X32/PH6U4X32W smar
 - Do not place APC account credentials, access tokens, LAN keys, or device configuration in Git.
 - The implementation is clean-room and does not copy the unlicensed APCBridge/AylaLocalAPI source.
 
-## Current status
+## Node mapping
 
-The project is in local-store proof-of-concept development. Implemented and tested:
+One configured strip creates one controller and exactly six children. Child
+addresses are deterministic hashes of the DSN and discovered property name, so
+they remain stable across plugin restarts, device restarts, and DHCP changes.
 
-- stable IoX-safe endpoint addresses;
-- confirmed-state command semantics;
-- per-property command retention until matching device telemetry;
-- PG3x server manifest and IoX profile for controller/switch nodes.
+| Role | IoX node |
+| --- | --- |
+| Strip status | Controller |
+| LED | LED child |
+| Outlets | Outlet 1, Outlet 2, and Outlet 3 children |
+| USB controls | USB 1 and USB 2 children |
 
-Still required before hardware installation:
+Property identity comes from protected bootstrap metadata and is mapped by role,
+not list order. Startup rejects incomplete, duplicate, non-Boolean, read-only, or
+extra endpoint mappings.
 
-- encrypted Ayla LAN key exchange and callback server;
-- PG3x runtime node classes;
-- safe import of existing cached device/LAN metadata;
-- reconnect, DHCP recovery, timeout/retry, and hardware acceptance tests.
+## Status meanings
+
+- `ST` on a child is the last authenticated device report. A command never
+  changes it optimistically.
+- `Connected` means a current LAN registration/session exchange has succeeded.
+- `Command Pending` means an On/Off intent is awaiting matching telemetry.
+- `State Stale` means no recent verified report was received or communication
+  failed. The last confirmed `ST` remains visible and must not be mistaken for a
+  fresh reading.
+- Controller `Last Confirmed Update Age` is seconds since the strip was last
+  authenticated. Zero before the first report does not mean the state is fresh;
+  consult `State Stale`.
 
 ## Development
 
@@ -35,4 +49,25 @@ uv run pytest -q
 
 ## Hardware acceptance gate
 
-An actual install or outlet command requires explicit approval of a noncritical test endpoint. The existing Home Assistant APCBridge remains untouched until the native plugin has passed isolated tests.
+This package has automated/simulated validation only; it does not claim hardware
+validation. Installing it, retrieving live LAN material, or issuing a real LED,
+outlet, or USB command requires explicit human approval and a named noncritical
+test load. Never test with medical, safety, refrigeration, networking, server, or
+other critical loads. Production-store publication also requires separate human
+approval. The existing Home Assistant APCBridge remains untouched until the
+native plugin has passed an approved isolated hardware exercise.
+
+## Troubleshooting
+
+- Configuration notice: confirm `callback_host` is the eisy LAN address visible
+  to the strip and that `data/apc-bootstrap.json` exists with owner-only mode
+  `0600`.
+- Connected is false: verify LAN reachability and callback port 10275. Do not
+  expose or forward the callback port to the Internet.
+- State Stale or Command Pending persists: the runtime clears commands after the
+  configured bounded deadline/retries; check address metadata and reconnect with
+  Discover. It never fabricates success.
+- DHCP change: update only the protected bootstrap `address`; the next failed
+  registration refreshes it by DSN/key ID while preserving node addresses.
+- Diagnostics intentionally omit DSN/address/key material, payloads, and dynamic
+  exception text. Do not paste the bootstrap file into logs or support requests.

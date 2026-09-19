@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 from xml.etree import ElementTree
 
-
 ROOT = Path(__file__).parents[1]
 
 
@@ -15,6 +14,9 @@ def test_server_manifest_is_pg3x_installable():
     assert manifest["testMode"] is False
     assert int(manifest["shortPoll"]) < int(manifest["longPoll"])
     assert "password" not in json.dumps(manifest).lower()
+    assert "callback_host" in manifest["customParams"]
+    assert (ROOT / manifest["executable"]).is_file()
+    assert (ROOT / manifest["install"]).is_file()
 
 
 def test_profile_defines_controller_and_confirmed_switch_nodes():
@@ -32,9 +34,38 @@ def test_profile_defines_controller_and_confirmed_switch_nodes():
     }
 
     assert {"DON", "DOF", "QUERY"} <= accepted
-    assert {"ST", "GV0", "GV1"} <= statuses
+    assert {"ST", "GV0", "GV1", "GV2"} <= statuses
 
 
 def test_profile_xml_files_are_well_formed():
     ElementTree.parse(ROOT / "profile" / "nodedef" / "nodedefs.xml")
     ElementTree.parse(ROOT / "profile" / "editor" / "editors.xml")
+
+
+def test_runtime_has_no_home_assistant_or_external_mqtt_dependency():
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
+
+    assert "homeassistant" not in requirements + project
+    assert "paho" not in requirements + project
+    assert "mqtt" not in requirements + project
+
+
+def test_local_store_payload_contains_runtime_profile_and_operator_docs():
+    required = [
+        "apc-poly.py",
+        "install.sh",
+        "requirements.txt",
+        "server.json",
+        "POLYGLOT_CONFIG.md",
+        "profile/nodedef/nodedefs.xml",
+        "profile/editor/editors.xml",
+        "profile/nls/en_us.txt",
+        "src/apc_pg3x/pg3.py",
+        "src/apc_pg3x/runtime.py",
+        "src/apc_pg3x/callback_server.py",
+        "src/apc_pg3x/protocol.py",
+    ]
+    assert all((ROOT / name).is_file() for name in required)
+    install = (ROOT / "install.sh").read_text(encoding="utf-8")
+    assert "pip install --user --no-deps ." in install

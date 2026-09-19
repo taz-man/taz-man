@@ -13,6 +13,7 @@
   "profile_version": "0.1.0",
   "customParams": {
     "bootstrap_config_path": "data/apc-bootstrap.json",
+    "callback_host": "",
     "callback_port": "10275",
     "command_timeout_seconds": "8",
     "max_command_attempts": "3"
