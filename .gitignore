@@ -7,5 +7,6 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+.worktrees/
 data/
 *.log
