@@ -73,15 +73,21 @@ def test_local_store_payload_contains_runtime_profile_and_operator_docs():
     assert "pip install --user --no-deps ." in install
 
 
-def test_runtime_scripts_are_lf_only_and_checkout_policy_preserves_them():
+def test_runtime_sources_are_lf_only_and_checkout_policy_preserves_them():
     install = (ROOT / "install.sh").read_bytes()
     build_hook = (ROOT / "hatch_build.py").read_bytes()
     attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    python_sources = [
+        *ROOT.glob("*.py"),
+        *(ROOT / "src").rglob("*.py"),
+        *(ROOT / "tests").rglob("*.py"),
+    ]
 
     assert b"\x0d\x0a" not in install
     assert b"\x0d\x0a" not in build_hook
+    assert all(b"\x0d\x0a" not in path.read_bytes() for path in python_sources)
     assert "*.sh text eol=lf" in attributes.splitlines()
-    assert "hatch_build.py text eol=lf" in attributes.splitlines()
+    assert "*.py text eol=lf" in attributes.splitlines()
 
 
 def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():
