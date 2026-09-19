@@ -1,1 +1,2 @@
 *.sh text eol=lf
+hatch_build.py text eol=lf

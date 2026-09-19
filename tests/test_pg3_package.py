@@ -73,12 +73,22 @@ def test_local_store_payload_contains_runtime_profile_and_operator_docs():
     assert "pip install --user --no-deps ." in install
 
 
-def test_install_script_is_lf_only_and_checkout_policy_preserves_it():
+def test_runtime_scripts_are_lf_only_and_checkout_policy_preserves_them():
     install = (ROOT / "install.sh").read_bytes()
+    build_hook = (ROOT / "hatch_build.py").read_bytes()
     attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
 
     assert b"\x0d\x0a" not in install
+    assert b"\x0d\x0a" not in build_hook
     assert "*.sh text eol=lf" in attributes.splitlines()
+    assert "hatch_build.py text eol=lf" in attributes.splitlines()
+
+
+def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "retained until a transport failure" in readme
+    assert "Connected` can therefore be true while `State Stale` is true" in readme
 
 
 def test_sdist_preserves_pg3_entrypoint_executable_modes(tmp_path):
