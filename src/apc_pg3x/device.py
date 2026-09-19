@@ -185,7 +185,6 @@ class AylaLanDevice:
     def fetch_commands(self, *, source_address: str, now: float) -> dict:
         with self._lock:
             self._require_source(source_address)
-            self._mark_seen(now)
             self._sequence += 1
             payload = self._queue.payload(
                 sequence=self._sequence,
@@ -217,7 +216,7 @@ class AylaLanDevice:
                     raise ProtocolError("malformed datapoint response")
                 parsed.append((name, value))
 
-            self._mark_seen(now)
+            self._mark_confirmed_telemetry(now)
             for name, value in parsed:
                 self._states[name].report(value, now=now)
                 self._queue.confirm(name, value)
@@ -231,11 +230,11 @@ class AylaLanDevice:
                 _LOGGER.warning("Ayla LAN state reporting callback failed")
 
     def establish_session(self, *, source_address: str, now: float) -> None:
+        del now
         with self._lock:
             self._require_source(source_address)
-            self._mark_seen(now)
 
-    def _mark_seen(self, now: float) -> None:
+    def _mark_confirmed_telemetry(self, now: float) -> None:
         self.connected = True
         self.stale = False
         self.last_seen_at = now
@@ -282,7 +281,6 @@ class AylaLanDevice:
             self._refresh_address()
             self._next_keepalive_at = now + self.policy.backoff(self._keepalive_failures)
             return
-        self.connected = True
         self._keepalive_failures = 0
         self._next_keepalive_at = now + self.policy.keepalive_interval
 

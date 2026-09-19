@@ -275,7 +275,26 @@ def test_confirmed_state_becomes_stale_without_telemetry_and_recovers():
 
     device.establish_session(source_address="one.local", now=41.0)
     assert device.connected is True
+    assert device.stale is True
+
+    device.receive_datapoints({"usb_1": True}, source_address="one.local", now=41.1)
+    assert device.connected is True
     assert device.stale is False
+
+
+def test_registration_session_and_command_fetch_do_not_claim_confirmed_health():
+    transport = FakeTransport()
+    device = make_device(transport=transport)
+    device.request("outlet_1", True, now=10.0)
+
+    device.poll(now=10.0)
+    device.establish_session(source_address="one.local", now=10.1)
+    device.fetch_commands(source_address="one.local", now=10.2)
+
+    assert transport.calls[-1]["notify"] is True
+    assert device.connected is False
+    assert device.stale is True
+    assert device.last_seen_at is None
 
 
 def test_idle_keepalive_recovers_dhcp_change_without_pending_command():
@@ -290,7 +309,8 @@ def test_idle_keepalive_recovers_dhcp_change_without_pending_command():
     device.poll(now=1.0)
     assert transport.calls[-1]["address"] == "new.local"
     assert transport.calls[-1]["notify"] is False
-    assert device.connected is True
+    assert device.connected is False
+    assert device.stale is True
 
 
 def test_reporting_callback_failure_cannot_partially_commit_datapoints():

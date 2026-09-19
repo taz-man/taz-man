@@ -135,16 +135,37 @@ def test_runtime_recreates_one_controller_and_six_stable_children(tmp_path):
         restarted.close()
 
 
-def test_command_is_non_optimistic_until_verified_report(tmp_path):
+def test_command_dispatch_is_immediate_but_state_waits_for_verified_report(tmp_path):
     clock = Clock()
-    runtime, publisher, _ = make_runtime(tmp_path, clock=clock)
+    transport = Transport()
+    runtime, publisher, _ = make_runtime(tmp_path, clock=clock, transport=transport)
     try:
+        manifest = json.loads(
+            (Path(__file__).parents[1] / "server.json").read_text(encoding="utf-8")
+        )
+        short_poll = int(manifest["shortPoll"])
+        assert short_poll == 15
+        assert runtime.device.policy.command_timeout == 8.0
+
         address = runtime.child_addresses["outlet_1"]
         assert publisher.drivers.get((address, "ST")) is None
 
         runtime.command("outlet_1", True)
         assert publisher.drivers.get((address, "ST")) is None
         assert publisher.drivers[(address, "GV1")] == 1
+        assert transport.calls == [
+            {
+                "address": "192.0.2.10",
+                "callback_host": "127.0.0.1",
+                "callback_port": runtime._settings.callback_port,
+                "notify": True,
+            }
+        ]
+
+        clock.now += short_poll
+        runtime.poll()
+        assert transport.calls[0]["notify"] is True
+        assert publisher.drivers.get((address, "ST")) is None
 
         clock.now += 1
         runtime.device.receive_datapoints(

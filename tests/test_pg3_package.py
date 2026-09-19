@@ -69,3 +69,11 @@ def test_local_store_payload_contains_runtime_profile_and_operator_docs():
     assert all((ROOT / name).is_file() for name in required)
     install = (ROOT / "install.sh").read_text(encoding="utf-8")
     assert "pip install --user --no-deps ." in install
+
+
+def test_install_script_is_lf_only_and_checkout_policy_preserves_it():
+    install = (ROOT / "install.sh").read_bytes()
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+
+    assert b"\x0d\x0a" not in install
+    assert "*.sh text eol=lf" in attributes.splitlines()

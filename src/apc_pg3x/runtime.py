@@ -150,8 +150,11 @@ class PluginRuntime:
 
     def command(self, role: str, value: bool) -> None:
         binding = self.config.binding(role)
-        self.device.request(binding.name, value, now=self._clock())
+        now = self._clock()
+        self.device.request(binding.name, value, now=now)
+        self.device.poll(now=now)
         self._publisher.set_child(self.child_addresses[role], "GV1", 1, force=True)
+        self._publish_health()
 
     def query(self) -> None:
         self.poll()
