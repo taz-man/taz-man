@@ -1,4 +1,6 @@
 import json
+import subprocess
+import tarfile
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -77,3 +79,21 @@ def test_install_script_is_lf_only_and_checkout_policy_preserves_it():
 
     assert b"\x0d\x0a" not in install
     assert "*.sh text eol=lf" in attributes.splitlines()
+
+
+def test_sdist_preserves_pg3_entrypoint_executable_modes(tmp_path):
+    subprocess.run(
+        ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],
+        cwd=ROOT,
+        check=True,
+    )
+    (sdist,) = tmp_path.glob("*.tar.gz")
+
+    with tarfile.open(sdist, "r:gz") as archive:
+        modes = {
+            Path(member.name).name: member.mode & 0o777
+            for member in archive.getmembers()
+            if Path(member.name).name in {"apc-poly.py", "install.sh"}
+        }
+
+    assert modes == {"apc-poly.py": 0o755, "install.sh": 0o755}

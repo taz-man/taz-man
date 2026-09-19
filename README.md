@@ -31,14 +31,16 @@ extra endpoint mappings.
 
 - `ST` on a child is the last authenticated device report. A command never
   changes it optimistically.
-- `Connected` means a current LAN registration/session exchange has succeeded.
+- `Connected` means authenticated, confirmed device telemetry has been received
+  recently. Registration, key exchange, command fetch, and keepalive traffic do
+  not mark the strip connected or refresh telemetry freshness.
 - `Command Pending` means an On/Off intent is awaiting matching telemetry.
 - `State Stale` means no recent verified report was received or communication
   failed. The last confirmed `ST` remains visible and must not be mistaken for a
   fresh reading.
-- Controller `Last Confirmed Update Age` is seconds since the strip was last
-  authenticated. Zero before the first report does not mean the state is fresh;
-  consult `State Stale`.
+- Controller `Last Confirmed Update Age` is seconds since the last authenticated,
+  confirmed telemetry report. Zero before the first report does not mean the
+  state is fresh; consult `State Stale`.
 
 ## Development
 
