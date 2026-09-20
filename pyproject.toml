@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Native PG3x plugin core for APC PH6U4X32 via Ayla LAN"
 requires-python = ">=3.11"
 dependencies = [
+  "udi_interface>=3.3.13,<4; platform_system != 'Windows'",
   "requests>=2.32,<3",
   "pycryptodome>=3.20,<4",
 ]
@@ -20,6 +21,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/apc_pg3x"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"

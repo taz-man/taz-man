@@ -1,7 +1,8 @@
 import json
+import subprocess
+import tarfile
 from pathlib import Path
 from xml.etree import ElementTree
-
 
 ROOT = Path(__file__).parents[1]
 
@@ -15,6 +16,9 @@ def test_server_manifest_is_pg3x_installable():
     assert manifest["testMode"] is False
     assert int(manifest["shortPoll"]) < int(manifest["longPoll"])
     assert "password" not in json.dumps(manifest).lower()
+    assert "callback_host" in manifest["customParams"]
+    assert (ROOT / manifest["executable"]).is_file()
+    assert (ROOT / manifest["install"]).is_file()
 
 
 def test_profile_defines_controller_and_confirmed_switch_nodes():
@@ -32,9 +36,94 @@ def test_profile_defines_controller_and_confirmed_switch_nodes():
     }
 
     assert {"DON", "DOF", "QUERY"} <= accepted
-    assert {"ST", "GV0", "GV1"} <= statuses
+    assert {"ST", "GV0", "GV1", "GV2"} <= statuses
 
 
 def test_profile_xml_files_are_well_formed():
     ElementTree.parse(ROOT / "profile" / "nodedef" / "nodedefs.xml")
     ElementTree.parse(ROOT / "profile" / "editor" / "editors.xml")
+
+
+def test_runtime_has_no_home_assistant_or_external_mqtt_dependency():
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
+
+    assert "homeassistant" not in requirements + project
+    assert "paho" not in requirements + project
+    assert "mqtt" not in requirements + project
+
+
+def test_local_store_payload_contains_runtime_profile_and_operator_docs():
+    required = [
+        "apc-poly.py",
+        "install.sh",
+        "requirements.txt",
+        "server.json",
+        "POLYGLOT_CONFIG.md",
+        "profile/nodedef/nodedefs.xml",
+        "profile/editor/editors.xml",
+        "profile/nls/en_us.txt",
+        "src/apc_pg3x/pg3.py",
+        "src/apc_pg3x/runtime.py",
+        "src/apc_pg3x/callback_server.py",
+        "src/apc_pg3x/protocol.py",
+    ]
+    assert all((ROOT / name).is_file() for name in required)
+    install = (ROOT / "install.sh").read_text(encoding="utf-8")
+    assert "pip install --user --no-deps ." in install
+
+
+def test_runtime_sources_are_lf_only_and_checkout_policy_preserves_them():
+    install = (ROOT / "install.sh").read_bytes()
+    build_hook = (ROOT / "hatch_build.py").read_bytes()
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    python_sources = [
+        *ROOT.glob("*.py"),
+        *(ROOT / "src").rglob("*.py"),
+        *(ROOT / "tests").rglob("*.py"),
+    ]
+
+    assert b"\x0d\x0a" not in install
+    assert b"\x0d\x0a" not in build_hook
+    assert all(b"\x0d\x0a" not in path.read_bytes() for path in python_sources)
+    assert b"\x0d\x0a" not in (ROOT / "README.md").read_bytes()
+    assert b"\x0d\x0a" not in (ROOT / "POLYGLOT_CONFIG.md").read_bytes()
+    assert "*.sh text eol=lf" in attributes.splitlines()
+    assert "*.py text eol=lf" in attributes.splitlines()
+    assert "*.md text eol=lf" in attributes.splitlines()
+
+
+def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "retained until a transport failure" in readme
+    assert "Connected` can therefore be true while `State Stale` is true" in readme
+
+
+def test_operator_docs_explain_safe_pg3x_upload_resolution_and_reason_codes():
+    config_doc = (ROOT / "POLYGLOT_CONFIG.md").read_text(encoding="utf-8")
+
+    assert "apc-bootstrap.json" in config_doc
+    assert "data/apc-bootstrap.json" in config_doc
+    assert "BOOTSTRAP_AMBIGUOUS" in config_doc
+    assert "BOOTSTRAP_OWNER" in config_doc
+    assert "CALLBACK_HOST" in config_doc
+    assert "explicit" in config_doc
+
+
+def test_sdist_preserves_pg3_entrypoint_executable_modes(tmp_path):
+    subprocess.run(
+        ["uv", "build", "--sdist", "--out-dir", str(tmp_path)],
+        cwd=ROOT,
+        check=True,
+    )
+    (sdist,) = tmp_path.glob("*.tar.gz")
+
+    with tarfile.open(sdist, "r:gz") as archive:
+        modes = {
+            Path(member.name).name: member.mode & 0o777
+            for member in archive.getmembers()
+            if Path(member.name).name in {"apc-poly.py", "install.sh"}
+        }
+
+    assert modes == {"apc-poly.py": 0o755, "install.sh": 0o755}

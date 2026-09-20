@@ -39,11 +39,15 @@ class CommandQueue:
             raise ValueError("property name is required")
         self._pending[name] = PendingCommand(name=name, value=bool(value), created_at=now)
 
-    def payload(self, *, sequence: int, now: float) -> dict:
+    def payload(self, *, sequence: int, now: float, max_attempts: int | None = None) -> dict:
         if sequence < 1:
             raise ValueError("sequence must be positive")
+        if max_attempts is not None and max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
         properties = []
         for command in self._pending.values():
+            if max_attempts is not None and command.attempts >= max_attempts:
+                continue
             command.attempts += 1
             command.last_sent_at = now
             properties.append(command.as_property())
@@ -59,3 +63,9 @@ class CommandQueue:
     def attempts(self, name: str) -> int:
         command = self._pending.get(name)
         return 0 if command is None else command.attempts
+
+    def discard(self, name: str) -> bool:
+        return self._pending.pop(name, None) is not None
+
+    def names(self) -> tuple[str, ...]:
+        return tuple(self._pending)
