@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 Scope: APCSurge private Local Store plugin on PG3x 3.4.24
-Status: proposed; implementation remains blocked pending independent review
+Status: accepted with documented PG3x lifecycle uncertainty; implementation candidate requires independent review
 
 ## Decision
 
@@ -10,7 +10,10 @@ Use the supported per-install **ZIP File Upload** into the plugin's canonical `d
 
 The upload mechanism is the only compared mechanism whose scope matches the requirement: one secret-bearing bootstrap for one installed slot. PG3x 3.4.24 explicitly says that the ZIP is extracted to that installed plugin's `data` directory, and a Universal Devices employee states that this directory is slot-local and included in PG3 backup. The plugin must retain the existing fail-closed, pre-read hardening for the one canonical uploaded file because PG3x does not document or preserve an owner-only extracted mode.
 
-No implementation should proceed from this record until the pre-created independent review approves it.
+The user explicitly accepted the remaining undocumented PG3x staging,
+deletion, backup/restore, and reinstall behavior. The implementation may proceed
+without claiming guarantees in those areas; its immutable result still requires
+the pre-created independent code/artifact review before deployment.
 
 ## Evidence and comparison
 
@@ -23,7 +26,7 @@ No implementation should proceed from this record until the pre-created independ
 | Delivery/update/restart | Official docs: sent at install, delivered on plugin start through `NSCustom`, and pushed periodically so a developer can update it at any time. `udi_interface` also publishes `CUSTOMNS` during initial configuration and when Polyglot sends a changed custom item. This behavior is unsuitable for immutable per-install bootstrap material because a store edit can replace all installs' value independently of a release. | Upload is an explicit per-install operator action. The 3.4.24 frontend posts the ZIP and reports completion, but exposes no content-change event to the plugin. Treat upload completion as extraction only: restart only the plugin, then require runtime acceptance and passive topology read-back. |
 | Reinstall and backup | Database persistence is documented generally by `udi_interface`, but the publishing docs do not establish per-install ownership, backup inclusion, or deletion semantics for the developer `nsdata` source. Reinstall would source the store value again. | Publishing docs define **Persistent Folder** as a plugin-home folder that survives reinstall; configure it as `data`. The UDI employee explicitly states uploaded `data` files are included in PG3 backup. |
 | Owner/mode | Filesystem ownership/mode is not applicable. Transport and database/log exposure remain. | Public docs and 3.4.24 UI state no owner/mode guarantee. The prior supported-UI diagnostic upload was rejected as `BOOTSTRAP_MODE`, proving extraction did not preserve the required owner-only mode. Continue only with the already-reviewed design that opens the exact default candidate without following links, verifies plugin-euid ownership/regular file/link count/size and parent traversal before reading, performs descriptor-based `0600` normalization, fsyncs and re-verifies identity/mode, and fails closed otherwise. This is compensating runtime hardening, not a PG3x guarantee. |
-| Clear/scrub through supported means | `udi_interface.Custom.clear()` can save an empty custom object, but no official document establishes that a plugin can clear the developer/store `nsdata` source. A later periodic store push can repopulate it. It is therefore not a dependable one-time consume-and-scrub channel. | No PG3x UI delete/download control was found. The plugin can remove or replace its own canonical file after validated ingestion as ordinary operation inside its data directory; if ingestion is rejected before safe ownership is established, the supported operator fallback is to overwrite it with a non-secret one-member ZIP through the same UI. The protected bootstrap should not be retained after successful migration to the plugin's narrowly scoped runtime state. |
+| Clear/scrub through supported means | `udi_interface.Custom.clear()` can save an empty custom object, but no official document establishes that a plugin can clear the developer/store `nsdata` source. A later periodic store push can repopulate it. It is therefore not a dependable one-time consume-and-scrub channel. | No PG3x UI delete/download control was found. The current runtime needs the canonical source for restart and address refresh, so it retains that source only after verifying mode `0600`. A future protected-cache import may attempt unlink only as best-effort; no source establishes that PG3x removes staging copies or that backup/restore or reinstall cannot resurrect it. Neither approach is secure erasure. |
 | Distinct deployed version | Custom Data can change periodically without changing plugin version, so its delivery cannot prove which code accepted it. | Official publishing docs require a version in each purchase option and identify the installation URL/branch. PG3x details distinguishes installed/current and latest versions, but does not expose a Git commit hash. Every deployable code change therefore needs a new semver reported consistently by the purchase option and runtime; verify the supported UI's installed/current version after reinstall and independently verify the public repository head/artifact hash before installation. Do not use an unchanged `0.1.0` label as evidence of a distinct deployed build. |
 
 ## Why the earlier top-level fallback was wrong

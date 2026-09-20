@@ -233,22 +233,35 @@ def test_foreign_owned_bootstrap_has_bounded_reason_code(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
 def test_uploaded_default_mode_is_hardened_before_secret_read(tmp_path, monkeypatch):
-    path = tmp_path / "apc-bootstrap.json"
+    path = tmp_path / "data" / "apc-bootstrap.json"
+    path.parent.mkdir()
     write_bootstrap(path)
     path.chmod(0o644)
     events = []
     real_fchmod = config_module.os.fchmod
+    real_fsync = config_module.os.fsync
+    real_fstat = config_module.os.fstat
     real_read = config_module.os.read
 
     def recording_fchmod(fd, mode):
         events.append(("chmod", mode))
         return real_fchmod(fd, mode)
 
+    def recording_fsync(fd):
+        events.append(("fsync", fd))
+        return real_fsync(fd)
+
+    def recording_fstat(fd):
+        events.append(("fstat", fd))
+        return real_fstat(fd)
+
     def recording_read(fd, size):
         events.append(("read", size))
         return real_read(fd, size)
 
     monkeypatch.setattr(config_module.os, "fchmod", recording_fchmod)
+    monkeypatch.setattr(config_module.os, "fsync", recording_fsync)
+    monkeypatch.setattr(config_module.os, "fstat", recording_fstat)
     monkeypatch.setattr(config_module.os, "read", recording_read)
 
     config = BootstrapConfigStore(
@@ -259,8 +272,25 @@ def test_uploaded_default_mode_is_hardened_before_secret_read(tmp_path, monkeypa
 
     assert config.dsn == "AC0000000001"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert events[0] == ("chmod", 0o600)
-    assert any(event[0] == "read" for event in events[1:])
+    operations = [event[0] for event in events]
+    assert operations == ["fstat", "chmod", "fsync", "fstat", "read", "read"]
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_canonical_source_is_retained_at_mode_0600_for_restart(tmp_path):
+    path = tmp_path / "data" / "apc-bootstrap.json"
+    path.parent.mkdir()
+    write_bootstrap(path)
+    path.chmod(0o644)
+
+    BootstrapConfigStore(
+        path,
+        normalize_uploaded_mode=True,
+        plugin_root=tmp_path,
+    ).load()
+
+    assert path.is_file()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 @pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
@@ -277,8 +307,8 @@ def test_explicit_insecure_bootstrap_is_rejected_without_repair(tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
-def test_mode_normalization_flag_cannot_repair_a_nondefault_name(tmp_path):
-    path = tmp_path / "custom.json"
+def test_mode_normalization_flag_cannot_repair_top_level_fallback(tmp_path):
+    path = tmp_path / "apc-bootstrap.json"
     write_bootstrap(path)
     path.chmod(0o644)
 
@@ -296,7 +326,8 @@ def test_mode_normalization_flag_cannot_repair_a_nondefault_name(tmp_path):
 @pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
 def test_uploaded_hardlink_is_rejected_without_repair(tmp_path):
     original = tmp_path / "original.json"
-    uploaded = tmp_path / "apc-bootstrap.json"
+    uploaded = tmp_path / "data" / "apc-bootstrap.json"
+    uploaded.parent.mkdir()
     write_bootstrap(original)
     original.chmod(0o644)
     try:
@@ -318,7 +349,8 @@ def test_uploaded_hardlink_is_rejected_without_repair(tmp_path):
 @pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
 def test_uploaded_symlink_is_rejected_without_changing_target(tmp_path):
     target = tmp_path / "target.json"
-    uploaded = tmp_path / "apc-bootstrap.json"
+    uploaded = tmp_path / "data" / "apc-bootstrap.json"
+    uploaded.parent.mkdir()
     write_bootstrap(target)
     target.chmod(0o644)
     try:
@@ -338,9 +370,36 @@ def test_uploaded_symlink_is_rejected_without_changing_target(tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_canonical_parent_symlink_is_rejected_before_read(tmp_path, monkeypatch):
+    target_dir = tmp_path / "target-data"
+    target_dir.mkdir()
+    target = target_dir / "apc-bootstrap.json"
+    write_bootstrap(target)
+    try:
+        (tmp_path / "data").symlink_to(target_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlink creation is unavailable")
+    monkeypatch.setattr(
+        config_module.os,
+        "read",
+        lambda *_args: pytest.fail("bootstrap below a symlinked parent must not be read"),
+    )
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(
+            tmp_path / "data" / "apc-bootstrap.json",
+            normalize_uploaded_mode=True,
+            plugin_root=tmp_path,
+        ).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_TYPE
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
 def test_path_swap_after_open_fails_closed_before_read(tmp_path, monkeypatch):
-    uploaded = tmp_path / "apc-bootstrap.json"
+    uploaded = tmp_path / "data" / "apc-bootstrap.json"
     replacement = tmp_path / "replacement.json"
+    uploaded.parent.mkdir()
     write_bootstrap(uploaded, address="192.0.2.10")
     write_bootstrap(replacement, address="192.0.2.99")
     uploaded.chmod(0o644)
@@ -370,7 +429,8 @@ def test_path_swap_after_open_fails_closed_before_read(tmp_path, monkeypatch):
 
 
 def test_oversized_bootstrap_is_rejected_before_read(tmp_path, monkeypatch):
-    path = tmp_path / "apc-bootstrap.json"
+    path = tmp_path / "data" / "apc-bootstrap.json"
+    path.parent.mkdir()
     path.write_bytes(b" " * (config_module.MAX_BOOTSTRAP_BYTES + 1))
     path.chmod(0o600)
     monkeypatch.setattr(
@@ -387,7 +447,8 @@ def test_oversized_bootstrap_is_rejected_before_read(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(config_module.os.name == "posix", reason="Windows portability probe")
 def test_windows_load_does_not_attempt_posix_mode_hardening(tmp_path, monkeypatch):
-    path = tmp_path / "apc-bootstrap.json"
+    path = tmp_path / "data" / "apc-bootstrap.json"
+    path.parent.mkdir()
     write_bootstrap(path)
     monkeypatch.setattr(
         config_module.os,

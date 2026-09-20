@@ -1,46 +1,49 @@
 # Configuration
 
-The plugin expects a protected bootstrap file at `data/apc-bootstrap.json`. It
-contains the already-provisioned strip's stable identity, current LAN address,
-six discovered Boolean property mappings, and Ayla LAN key material. Set file
-mode `0600`; startup rejects a symlink, non-regular file, or broader permissions
-on eisy. The file must also be owned by the account running the plugin. The
-containing `data` directory is installed as `0700`.
+The plugin reads bootstrap material only from the canonical persistent path
+`data/apc-bootstrap.json`. It contains the already-provisioned strip's stable
+identity, current LAN address, six discovered Boolean property mappings, and
+Ayla LAN key material. Configure the Local Store **Persistent Folder** as
+`data`. Do not use **Plugin Custom Data** (`nsdata`/`CUSTOMNS`) for this
+per-install secret, and do not enter a bootstrap path as a custom parameter.
+Set the Local Store purchase-option version to `0.1.1`; a same-version reinstall
+does not distinguish this corrected runtime from the prior `0.1.0` build.
 
 ## PG3x ZIP upload layout
 
-PG3x's file-upload control extracts ZIP members at the plugin root. For the
-default `bootstrap_config_path`, the plugin checks exactly two deterministic
-locations: the installed `data/apc-bootstrap.json` path and the uploaded
-top-level `apc-bootstrap.json` path. It accepts the one that exists. If both
-exist, startup fails with `BOOTSTRAP_AMBIGUOUS`; it never guesses between them.
-Paths containing `..`, paths outside the plugin root, and paths whose parent is
-a symlink are rejected. A final-component symlink is also rejected by the
-protected-file check.
+Create a ZIP containing exactly one regular member named `apc-bootstrap.json`
+and upload it through the installed plugin's PG3x **ZIP File Upload** control.
+PG3x 3.4.24 says it extracts that member into the plugin's `data` directory,
+producing exactly `data/apc-bootstrap.json`. A top-level plugin-root fallback,
+an explicit alternate path, symlinks, hard links, traversal, and recursive file
+searches are prohibited.
 
-The supported uploader can create the top-level default candidate with broader
-permissions than `0600`. On POSIX, and only for that exact fallback candidate,
-startup opens the file without following symlinks and validates root
-containment, owner, regular-file type, single-link status, and the 64 KiB size
-limit before changing mode through the verified descriptor. It flushes and
-re-validates that same descriptor before reading any bytes. Installed-default
-and explicit/custom paths are never repaired. Unsupported operations or any
-failed/replaced invariant fail closed with a bounded reason code.
+PG3x does not document the extracted owner or mode. On POSIX, and only for the
+exact canonical candidate, startup opens every path component without following
+symlinks and validates root containment, owner, regular-file type, single-link
+status, and the 64 KiB size limit before changing mode through the verified
+descriptor. It fsyncs and re-stats that same descriptor, requires unchanged
+device/inode identity and exact mode `0600`, and only then reads bounded bytes.
+Unsupported operations or any failed/replaced invariant fail closed with a
+bounded reason code.
 
 This cannot remove the short exposure between PG3x extracting the upload and
-plugin startup hardening it. The bootstrap must therefore contain only the
-dedicated local-device material described below, be uploaded only through the
-supported local PG3x UI, and not be left staged while the plugin is stopped.
+plugin startup hardening it. Upload only through the supported local PG3x UI and
+restart only this plugin immediately afterward. Require runtime acceptance and
+passive topology read-back; upload completion alone is not acceptance.
 
-An explicit non-default `bootstrap_config_path` remains authoritative: no
-fallback is attempted, and the configured path must remain beneath the plugin
-root. The same owner, regular-file, and `0600` checks apply.
+The current runtime needs the source on restart and when refreshing address
+metadata, so it is retained only at verified mode `0600` in persistent `data`.
+It is not consumed or unlinked. If a future design imports it into another
+protected cache, unlinking the source may be attempted only as best-effort:
+PG3x staging-copy deletion and whether backup/restore or reinstall can resurrect
+the uploaded file are not guaranteed. Neither retention nor unlink is secure
+erasure, and this plugin makes no secure erasure claim.
 
 Do not commit that file. Account credentials are not intended to remain configured after bootstrap.
 
 Parameters:
 
-- `bootstrap_config_path`: path under the plugin directory to protected bootstrap data.
 - `callback_host`: eisy LAN address reachable from the strip. This is required.
 - `callback_port`: LAN-reachable HTTP callback port advertised to the strip; default `10275`.
 - `command_timeout_seconds`: maximum wait for matching device telemetry before a command fails.
@@ -94,9 +97,8 @@ derived key, payload, or exception text:
 - `BOOTSTRAP_JSON`: the file cannot be read as UTF-8 JSON.
 - `BOOTSTRAP_SCHEMA`: required fields or the exact six writable Boolean mappings
   are invalid.
-- `BOOTSTRAP_PATH`: a configured path escapes the plugin root or traverses a
-  symlinked parent.
-- `BOOTSTRAP_AMBIGUOUS`: both documented default candidates exist.
+- `BOOTSTRAP_PATH`: a noncanonical configured path, root escape, or symlinked
+  parent was rejected.
 - `CALLBACK_HOST`: the callback host is empty or is not a plain IP address or DNS
   hostname.
 - `CALLBACK_PORT`: the callback port is outside 1-65535.

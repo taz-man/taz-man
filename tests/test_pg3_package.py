@@ -1,8 +1,11 @@
 import json
 import subprocess
 import tarfile
+import tomllib
 from pathlib import Path
 from xml.etree import ElementTree
+
+import apc_pg3x
 
 ROOT = Path(__file__).parents[1]
 
@@ -19,6 +22,25 @@ def test_server_manifest_is_pg3x_installable():
     assert "callback_host" in manifest["customParams"]
     assert (ROOT / manifest["executable"]).is_file()
     assert (ROOT / manifest["install"]).is_file()
+
+
+def test_supported_pg3x_version_is_0_1_1_everywhere():
+    manifest = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+
+    assert project["project"]["version"] == "0.1.1"
+    assert apc_pg3x.__version__ == "0.1.1"
+    assert manifest["profile_version"] == "0.1.1"
+    assert {credit["version"] for credit in manifest["credits"]} == {"0.1.1"}
+    assert 'name = "apc-ph6u4x32-pg3x"\nversion = "0.1.1"' in lock
+
+
+def test_bootstrap_path_is_canonical_and_not_user_editable():
+    manifest = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+
+    assert "bootstrap_config_path" not in manifest["customParams"]
+    assert "nsdata" not in json.dumps(manifest).lower()
 
 
 def test_profile_defines_controller_and_confirmed_switch_nodes():
@@ -105,15 +127,24 @@ def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():
     assert "Connected` can therefore be true while `State Stale` is true" in readme
 
 
-def test_operator_docs_explain_safe_pg3x_upload_resolution_and_reason_codes():
+def test_operator_docs_define_canonical_upload_and_truthful_lifecycle():
     config_doc = (ROOT / "POLYGLOT_CONFIG.md").read_text(encoding="utf-8")
 
-    assert "apc-bootstrap.json" in config_doc
     assert "data/apc-bootstrap.json" in config_doc
-    assert "BOOTSTRAP_AMBIGUOUS" in config_doc
+    assert "Persistent Folder" in config_doc
+    assert "Plugin Custom Data" in config_doc
+    assert "retained" in config_doc
+    assert "restart" in config_doc
+    assert "0600" in config_doc
+    assert "secure erasure" in config_doc
+    assert "staging" in config_doc
+    assert "backup" in config_doc
+    assert "resurrect" in config_doc
+    assert "top-level" in config_doc
+    assert "Local Store purchase-option version" in config_doc
+    assert "`0.1.1`" in config_doc
     assert "BOOTSTRAP_OWNER" in config_doc
     assert "CALLBACK_HOST" in config_doc
-    assert "explicit" in config_doc
 
 
 def test_sdist_preserves_pg3_entrypoint_executable_modes(tmp_path):

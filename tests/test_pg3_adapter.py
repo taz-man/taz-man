@@ -118,7 +118,7 @@ def test_pg3_application_subscribes_and_creates_fixed_topology(monkeypatch, tmp_
     app.load_restart_data({"dsn": "dsn", "last_address": "192.0.2.20"})
     app.configure(
         {
-            "bootstrap_config_path": "data/bootstrap.json",
+            "bootstrap_config_path": "data/apc-bootstrap.json",
             "callback_host": "192.0.2.5",
             "callback_port": "10275",
         }
@@ -142,7 +142,7 @@ def test_pg3_application_subscribes_and_creates_fixed_topology(monkeypatch, tmp_
 
 def test_pg3_application_rejects_bootstrap_path_escape(tmp_path, fake_udi):
     app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
-    with pytest.raises(ConfigurationError, match="under the plugin") as rejected:
+    with pytest.raises(ConfigurationError) as rejected:
         app._settings(
             {
                 "bootstrap_config_path": str(Path("..") / "secret.json"),
@@ -152,10 +152,10 @@ def test_pg3_application_rejects_bootstrap_path_escape(tmp_path, fake_udi):
     assert rejected.value.reason is RejectionReason.BOOTSTRAP_PATH
 
 
-def test_default_bootstrap_path_accepts_pg3x_uploaded_root_file(tmp_path, fake_udi):
-    uploaded = tmp_path / "apc-bootstrap.json"
-    uploaded.write_text("{}", encoding="utf-8")
-    uploaded.chmod(0o600)
+def test_default_bootstrap_path_uses_only_canonical_data_file(tmp_path, fake_udi):
+    unsupported = tmp_path / "apc-bootstrap.json"
+    unsupported.write_text("{}", encoding="utf-8")
+    unsupported.chmod(0o600)
     app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
 
     _, store = app._settings(
@@ -165,30 +165,25 @@ def test_default_bootstrap_path_accepts_pg3x_uploaded_root_file(tmp_path, fake_u
         }
     )
 
-    assert store.path == uploaded
+    assert store.path == tmp_path / "data" / "apc-bootstrap.json"
     assert store.normalize_uploaded_mode is True
 
 
-def test_explicit_bootstrap_path_remains_authoritative(tmp_path, fake_udi):
-    uploaded = tmp_path / "apc-bootstrap.json"
-    uploaded.write_text("{}", encoding="utf-8")
-    explicit = tmp_path / "protected" / "custom.json"
-    explicit.parent.mkdir()
-    explicit.write_text("{}", encoding="utf-8")
+def test_noncanonical_bootstrap_path_is_prohibited(tmp_path, fake_udi):
     app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
 
-    _, store = app._settings(
-        {
-            "bootstrap_config_path": "protected/custom.json",
-            "callback_host": "eisy.local",
-        }
-    )
+    with pytest.raises(ConfigurationError) as rejected:
+        app._settings(
+            {
+                "bootstrap_config_path": "protected/custom.json",
+                "callback_host": "eisy.local",
+            }
+        )
 
-    assert store.path == explicit
-    assert store.normalize_uploaded_mode is False
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_PATH
 
 
-def test_installed_default_path_is_never_selected_for_mode_repair(tmp_path, fake_udi):
+def test_canonical_data_path_is_selected_for_mode_repair(tmp_path, fake_udi):
     canonical = tmp_path / "data" / "apc-bootstrap.json"
     canonical.parent.mkdir()
     canonical.write_text("{}", encoding="utf-8")
@@ -202,33 +197,23 @@ def test_installed_default_path_is_never_selected_for_mode_repair(tmp_path, fake
     )
 
     assert store.path == canonical
-    assert store.normalize_uploaded_mode is False
+    assert store.normalize_uploaded_mode is True
 
 
-def test_bootstrap_path_resolution_does_not_hide_symlink(tmp_path, fake_udi):
-    target = tmp_path / "target.json"
-    target.write_text("{}", encoding="utf-8")
-    link = tmp_path / "bootstrap.json"
-    try:
-        link.symlink_to(target)
-    except OSError:
-        pytest.skip("symlink creation is unavailable")
+def test_noncanonical_symlink_path_is_prohibited(tmp_path, fake_udi):
     app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
 
-    _, store = app._settings(
-        {
-            "bootstrap_config_path": "bootstrap.json",
-            "callback_host": "eisy.local",
-        }
-    )
-
-    assert store.path == link
     with pytest.raises(ConfigurationError) as rejected:
-        store.load()
-    assert rejected.value.reason is RejectionReason.BOOTSTRAP_TYPE
+        app._settings(
+            {
+                "bootstrap_config_path": "bootstrap.json",
+                "callback_host": "eisy.local",
+            }
+        )
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_PATH
 
 
-def test_default_bootstrap_path_rejects_ambiguous_upload_locations(tmp_path, fake_udi):
+def test_top_level_file_does_not_make_canonical_path_ambiguous(tmp_path, fake_udi):
     canonical = tmp_path / "data" / "apc-bootstrap.json"
     canonical.parent.mkdir()
     canonical.write_text("{}", encoding="utf-8")
@@ -236,14 +221,14 @@ def test_default_bootstrap_path_rejects_ambiguous_upload_locations(tmp_path, fak
     uploaded.write_text("{}", encoding="utf-8")
     app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
 
-    with pytest.raises(ConfigurationError, match="ambiguous") as rejected:
-        app._settings(
-            {
-                "bootstrap_config_path": "data/apc-bootstrap.json",
-                "callback_host": "192.0.2.5",
-            }
-        )
-    assert rejected.value.reason is RejectionReason.BOOTSTRAP_AMBIGUOUS
+    _, store = app._settings(
+        {
+            "bootstrap_config_path": "data/apc-bootstrap.json",
+            "callback_host": "192.0.2.5",
+        }
+    )
+
+    assert store.path == canonical
 
 
 def test_configuration_rejection_logs_only_bounded_reason_code(
@@ -261,11 +246,9 @@ def test_configuration_rejection_logs_only_bounded_reason_code(
             }
         )
 
-    assert caplog.messages == [
-        "APC plugin configuration rejected [BOOTSTRAP_MISSING]"
-    ]
+    assert caplog.messages == ["APC plugin configuration rejected [BOOTSTRAP_PATH]"]
     assert app.interface.Notices["configuration"] == (
-        "Configuration rejected [BOOTSTRAP_MISSING]."
+        "Configuration rejected [BOOTSTRAP_PATH]."
     )
     rendered = " ".join(caplog.messages + list(app.interface.Notices.values()))
     assert sensitive_path not in rendered

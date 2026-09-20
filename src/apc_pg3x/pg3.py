@@ -7,12 +7,7 @@ import os
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .config import (
-    PG3X_UPLOADED_BOOTSTRAP_NAME,
-    BootstrapConfigStore,
-    ConfigurationError,
-    RejectionReason,
-)
+from .config import BootstrapConfigStore, ConfigurationError, RejectionReason
 from .runtime import PluginRuntime, RuntimeSettings
 
 _LOGGER = logging.getLogger(__name__)
@@ -183,6 +178,11 @@ class Pg3Application:
         self, params: dict[str, object]
     ) -> tuple[RuntimeSettings, BootstrapConfigStore]:
         relative_path = str(params.get("bootstrap_config_path", _DEFAULT_BOOTSTRAP_PATH))
+        if relative_path != _DEFAULT_BOOTSTRAP_PATH:
+            raise ConfigurationError(
+                "bootstrap path must be the canonical data file",
+                RejectionReason.BOOTSTRAP_PATH,
+            )
         path = Path(os.path.abspath(self.plugin_root / relative_path))
         if not path.is_relative_to(self.plugin_root):
             raise ConfigurationError(
@@ -193,21 +193,7 @@ class Pg3Application:
             raise ConfigurationError(
                 "bootstrap path parent is unsafe", RejectionReason.BOOTSTRAP_PATH
             )
-        if relative_path == _DEFAULT_BOOTSTRAP_PATH:
-            uploaded_path = self.plugin_root / PG3X_UPLOADED_BOOTSTRAP_NAME
-            canonical_present = path.exists() or path.is_symlink()
-            uploaded_present = uploaded_path.exists() or uploaded_path.is_symlink()
-            if canonical_present and uploaded_present:
-                raise ConfigurationError(
-                    "bootstrap path is ambiguous", RejectionReason.BOOTSTRAP_AMBIGUOUS
-                )
-            if not canonical_present and uploaded_present:
-                path = uploaded_path
-                normalize_uploaded_mode = True
-            else:
-                normalize_uploaded_mode = False
-        else:
-            normalize_uploaded_mode = False
+        normalize_uploaded_mode = True
         callback_host = str(params.get("callback_host", "")).strip()
         settings = RuntimeSettings(
             callback_host=callback_host,

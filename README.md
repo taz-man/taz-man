@@ -64,16 +64,15 @@ native plugin has passed an approved isolated hardware exercise.
 
 - Configuration notice: use its bounded reason code with the table in
   `POLYGLOT_CONFIG.md`. Confirm `callback_host` is a plain IP address or hostname
-  visible to the strip. For the default path, startup accepts either installed
-  `data/apc-bootstrap.json` or PG3x-uploaded top-level `apc-bootstrap.json`, but
-  rejects the configuration if both exist. An explicit non-default path is used
-  exactly as configured. Bootstrap files must be regular, owned by the plugin
-  process account, single-linked, no larger than 64 KiB, and mode `0600`. On
-  POSIX, startup may normalize mode only for the exact PG3x-uploaded top-level
-  default candidate after descriptor-based checks and before reading it. It
-  never repairs an installed-default or explicit/custom path. PG3x extraction
-  can still expose the upload briefly before startup performs this hardening;
-  see `POLYGLOT_CONFIG.md` for the limitation and safe workflow.
+  visible to the strip. Bootstrap is accepted only at the canonical persistent
+  `data/apc-bootstrap.json` path; top-level fallbacks and alternate custom paths
+  are prohibited. Files must be regular, owned by the plugin process account,
+  single-linked, and no larger than 64 KiB. On POSIX, startup may normalize mode
+  only for that exact canonical candidate after descriptor-based checks and
+  before reading it. The runtime retains the source at verified mode `0600`
+  because restart and address refresh require it. PG3x extraction can expose an
+  upload before hardening, and staging/backup resurrection is undocumented; see
+  `POLYGLOT_CONFIG.md`. The plugin does not claim secure erasure.
 - Connected is false: verify LAN reachability and callback port 10275. Do not
   expose or forward the callback port to the Internet.
 - State Stale or Command Pending persists: the runtime clears commands after the

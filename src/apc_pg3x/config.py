@@ -19,7 +19,7 @@ EXPECTED_ROLES = (
     "usb_2",
 )
 MAX_BOOTSTRAP_BYTES = 65536
-PG3X_UPLOADED_BOOTSTRAP_NAME = "apc-bootstrap.json"
+PG3X_CANONICAL_BOOTSTRAP_PATH = Path("data") / "apc-bootstrap.json"
 
 
 class RejectionReason(str, Enum):
@@ -35,7 +35,6 @@ class RejectionReason(str, Enum):
     BOOTSTRAP_JSON = "BOOTSTRAP_JSON"
     BOOTSTRAP_SCHEMA = "BOOTSTRAP_SCHEMA"
     BOOTSTRAP_PATH = "BOOTSTRAP_PATH"
-    BOOTSTRAP_AMBIGUOUS = "BOOTSTRAP_AMBIGUOUS"
     CALLBACK_HOST = "CALLBACK_HOST"
     CALLBACK_PORT = "CALLBACK_PORT"
     SETTINGS = "SETTINGS"
@@ -232,7 +231,7 @@ class BootstrapConfigStore:
         return (
             self.normalize_uploaded_mode
             and self.plugin_root is not None
-            and self.path == self.plugin_root / PG3X_UPLOADED_BOOTSTRAP_NAME
+            and self.path == self.plugin_root / PG3X_CANONICAL_BOOTSTRAP_PATH
         )
 
     def _read_portable(self) -> bytes:
