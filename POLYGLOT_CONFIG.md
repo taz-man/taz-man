@@ -18,6 +18,20 @@ Paths containing `..`, paths outside the plugin root, and paths whose parent is
 a symlink are rejected. A final-component symlink is also rejected by the
 protected-file check.
 
+The supported uploader can create the top-level default candidate with broader
+permissions than `0600`. On POSIX, and only for that exact fallback candidate,
+startup opens the file without following symlinks and validates root
+containment, owner, regular-file type, single-link status, and the 64 KiB size
+limit before changing mode through the verified descriptor. It flushes and
+re-validates that same descriptor before reading any bytes. Installed-default
+and explicit/custom paths are never repaired. Unsupported operations or any
+failed/replaced invariant fail closed with a bounded reason code.
+
+This cannot remove the short exposure between PG3x extracting the upload and
+plugin startup hardening it. The bootstrap must therefore contain only the
+dedicated local-device material described below, be uploaded only through the
+supported local PG3x UI, and not be left staged while the plugin is stopped.
+
 An explicit non-default `bootstrap_config_path` remains authoritative: no
 fallback is attempted, and the configured path must remain beneath the plugin
 root. The same owner, regular-file, and `0600` checks apply.
@@ -72,7 +86,11 @@ derived key, payload, or exception text:
 - `BOOTSTRAP_MISSING`: no file exists at the selected location.
 - `BOOTSTRAP_TYPE`: the selected object is not a regular file or is a symlink.
 - `BOOTSTRAP_OWNER`: the file is not owned by the plugin process account.
-- `BOOTSTRAP_MODE`: group or world permission bits are present.
+- `BOOTSTRAP_MODE`: the file mode is not exactly `0600`.
+- `BOOTSTRAP_LINK`: the file has more or fewer than one filesystem link.
+- `BOOTSTRAP_SIZE`: the file exceeds the 64 KiB bootstrap limit.
+- `BOOTSTRAP_HARDEN`: descriptor-safe open, mode normalization, flush, or
+  post-change verification was unavailable or failed.
 - `BOOTSTRAP_JSON`: the file cannot be read as UTF-8 JSON.
 - `BOOTSTRAP_SCHEMA`: required fields or the exact six writable Boolean mappings
   are invalid.

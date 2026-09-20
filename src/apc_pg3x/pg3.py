@@ -7,12 +7,17 @@ import os
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .config import BootstrapConfigStore, ConfigurationError, RejectionReason
+from .config import (
+    PG3X_UPLOADED_BOOTSTRAP_NAME,
+    BootstrapConfigStore,
+    ConfigurationError,
+    RejectionReason,
+)
 from .runtime import PluginRuntime, RuntimeSettings
 
 _LOGGER = logging.getLogger(__name__)
 _DEFAULT_BOOTSTRAP_PATH = "data/apc-bootstrap.json"
-_PG3X_UPLOADED_BOOTSTRAP_PATH = "apc-bootstrap.json"
+
 
 
 class Pg3Publisher:
@@ -189,7 +194,7 @@ class Pg3Application:
                 "bootstrap path parent is unsafe", RejectionReason.BOOTSTRAP_PATH
             )
         if relative_path == _DEFAULT_BOOTSTRAP_PATH:
-            uploaded_path = self.plugin_root / _PG3X_UPLOADED_BOOTSTRAP_PATH
+            uploaded_path = self.plugin_root / PG3X_UPLOADED_BOOTSTRAP_NAME
             canonical_present = path.exists() or path.is_symlink()
             uploaded_present = uploaded_path.exists() or uploaded_path.is_symlink()
             if canonical_present and uploaded_present:
@@ -198,6 +203,11 @@ class Pg3Application:
                 )
             if not canonical_present and uploaded_present:
                 path = uploaded_path
+                normalize_uploaded_mode = True
+            else:
+                normalize_uploaded_mode = False
+        else:
+            normalize_uploaded_mode = False
         callback_host = str(params.get("callback_host", "")).strip()
         settings = RuntimeSettings(
             callback_host=callback_host,
@@ -205,7 +215,11 @@ class Pg3Application:
             command_timeout=_number(params, "command_timeout_seconds", 8.0),
             max_attempts=_integer(params, "max_command_attempts", 3),
         )
-        return settings, BootstrapConfigStore(path)
+        return settings, BootstrapConfigStore(
+            path,
+            normalize_uploaded_mode=normalize_uploaded_mode,
+            plugin_root=self.plugin_root,
+        )
 
 
 def _integer(values: dict[str, object], name: str, default: int) -> int:

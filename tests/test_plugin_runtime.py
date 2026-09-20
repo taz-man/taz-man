@@ -175,10 +175,18 @@ def test_group_readable_bootstrap_has_bounded_reason_code(tmp_path, monkeypatch)
     path = tmp_path / "bootstrap.json"
     path.write_text("{}", encoding="utf-8")
     store = BootstrapConfigStore(path)
-    file_stat = SimpleNamespace(st_mode=stat.S_IFREG | 0o640, st_uid=1000)
-    monkeypatch.setattr(config_module, "_is_posix", lambda: True, raising=False)
-    monkeypatch.setattr(config_module, "_lstat", lambda _path: file_stat, raising=False)
-    monkeypatch.setattr(config_module.os, "geteuid", lambda: 1000, raising=False)
+    if config_module.os.name == "posix":
+        path.chmod(0o640)
+    else:
+        file_stat = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o640,
+            st_uid=1000,
+            st_nlink=1,
+            st_size=2,
+        )
+        monkeypatch.setattr(config_module, "_is_posix", lambda: True, raising=False)
+        monkeypatch.setattr(config_module, "_lstat", lambda _path: file_stat, raising=False)
+        monkeypatch.setattr(config_module.os, "geteuid", lambda: 1000, raising=False)
 
     with pytest.raises(ConfigurationError) as rejected:
         store.load()
@@ -190,15 +198,211 @@ def test_foreign_owned_bootstrap_has_bounded_reason_code(tmp_path, monkeypatch):
     path = tmp_path / "bootstrap.json"
     path.write_text("{}", encoding="utf-8")
     store = BootstrapConfigStore(path)
-    file_stat = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1001)
-    monkeypatch.setattr(config_module, "_is_posix", lambda: True, raising=False)
-    monkeypatch.setattr(config_module, "_lstat", lambda _path: file_stat, raising=False)
-    monkeypatch.setattr(config_module.os, "geteuid", lambda: 1000, raising=False)
+    if config_module.os.name == "posix":
+        path.chmod(0o600)
+        real_fstat = config_module.os.fstat
+
+        def foreign_fstat(descriptor):
+            result = real_fstat(descriptor)
+            return SimpleNamespace(
+                st_mode=result.st_mode,
+                st_uid=result.st_uid + 1,
+                st_nlink=result.st_nlink,
+                st_size=result.st_size,
+                st_dev=result.st_dev,
+                st_ino=result.st_ino,
+            )
+
+        monkeypatch.setattr(config_module.os, "fstat", foreign_fstat)
+    else:
+        file_stat = SimpleNamespace(
+            st_mode=stat.S_IFREG | 0o600,
+            st_uid=1001,
+            st_nlink=1,
+            st_size=2,
+        )
+        monkeypatch.setattr(config_module, "_is_posix", lambda: True, raising=False)
+        monkeypatch.setattr(config_module, "_lstat", lambda _path: file_stat, raising=False)
+        monkeypatch.setattr(config_module.os, "geteuid", lambda: 1000, raising=False)
 
     with pytest.raises(ConfigurationError) as rejected:
         store.load()
 
     assert rejected.value.reason is RejectionReason.BOOTSTRAP_OWNER
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_uploaded_default_mode_is_hardened_before_secret_read(tmp_path, monkeypatch):
+    path = tmp_path / "apc-bootstrap.json"
+    write_bootstrap(path)
+    path.chmod(0o644)
+    events = []
+    real_fchmod = config_module.os.fchmod
+    real_read = config_module.os.read
+
+    def recording_fchmod(fd, mode):
+        events.append(("chmod", mode))
+        return real_fchmod(fd, mode)
+
+    def recording_read(fd, size):
+        events.append(("read", size))
+        return real_read(fd, size)
+
+    monkeypatch.setattr(config_module.os, "fchmod", recording_fchmod)
+    monkeypatch.setattr(config_module.os, "read", recording_read)
+
+    config = BootstrapConfigStore(
+        path,
+        normalize_uploaded_mode=True,
+        plugin_root=tmp_path,
+    ).load()
+
+    assert config.dsn == "AC0000000001"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert events[0] == ("chmod", 0o600)
+    assert any(event[0] == "read" for event in events[1:])
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_explicit_insecure_bootstrap_is_rejected_without_repair(tmp_path):
+    path = tmp_path / "custom.json"
+    write_bootstrap(path)
+    path.chmod(0o644)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(path, plugin_root=tmp_path).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_MODE
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_mode_normalization_flag_cannot_repair_a_nondefault_name(tmp_path):
+    path = tmp_path / "custom.json"
+    write_bootstrap(path)
+    path.chmod(0o644)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(
+            path,
+            normalize_uploaded_mode=True,
+            plugin_root=tmp_path,
+        ).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_MODE
+    assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_uploaded_hardlink_is_rejected_without_repair(tmp_path):
+    original = tmp_path / "original.json"
+    uploaded = tmp_path / "apc-bootstrap.json"
+    write_bootstrap(original)
+    original.chmod(0o644)
+    try:
+        config_module.os.link(original, uploaded)
+    except OSError:
+        pytest.skip("hardlink creation is unavailable")
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(
+            uploaded,
+            normalize_uploaded_mode=True,
+            plugin_root=tmp_path,
+        ).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_LINK
+    assert stat.S_IMODE(original.stat().st_mode) == 0o644
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_uploaded_symlink_is_rejected_without_changing_target(tmp_path):
+    target = tmp_path / "target.json"
+    uploaded = tmp_path / "apc-bootstrap.json"
+    write_bootstrap(target)
+    target.chmod(0o644)
+    try:
+        uploaded.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(
+            uploaded,
+            normalize_uploaded_mode=True,
+            plugin_root=tmp_path,
+        ).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_TYPE
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+
+
+@pytest.mark.skipif(not hasattr(config_module.os, "geteuid"), reason="POSIX-only security probe")
+def test_path_swap_after_open_fails_closed_before_read(tmp_path, monkeypatch):
+    uploaded = tmp_path / "apc-bootstrap.json"
+    replacement = tmp_path / "replacement.json"
+    write_bootstrap(uploaded, address="192.0.2.10")
+    write_bootstrap(replacement, address="192.0.2.99")
+    uploaded.chmod(0o644)
+    real_fchmod = config_module.os.fchmod
+
+    def swap_path_then_chmod(fd, mode):
+        uploaded.unlink()
+        uploaded.symlink_to(replacement)
+        real_fchmod(fd, mode)
+
+    monkeypatch.setattr(config_module.os, "fchmod", swap_path_then_chmod)
+    monkeypatch.setattr(
+        config_module.os,
+        "read",
+        lambda *_args: pytest.fail("swapped bootstrap must not be read"),
+    )
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(
+            uploaded,
+            normalize_uploaded_mode=True,
+            plugin_root=tmp_path,
+        ).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_LINK
+    assert stat.S_IMODE(replacement.stat().st_mode) == 0o600
+
+
+def test_oversized_bootstrap_is_rejected_before_read(tmp_path, monkeypatch):
+    path = tmp_path / "apc-bootstrap.json"
+    path.write_bytes(b" " * (config_module.MAX_BOOTSTRAP_BYTES + 1))
+    path.chmod(0o600)
+    monkeypatch.setattr(
+        config_module.os,
+        "read",
+        lambda *_args: pytest.fail("oversized bootstrap must not be read"),
+    )
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(path, plugin_root=tmp_path).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_SIZE
+
+
+@pytest.mark.skipif(config_module.os.name == "posix", reason="Windows portability probe")
+def test_windows_load_does_not_attempt_posix_mode_hardening(tmp_path, monkeypatch):
+    path = tmp_path / "apc-bootstrap.json"
+    write_bootstrap(path)
+    monkeypatch.setattr(
+        config_module.os,
+        "fchmod",
+        lambda *_args: pytest.fail("Windows must not call fchmod"),
+        raising=False,
+    )
+
+    config = BootstrapConfigStore(
+        path,
+        normalize_uploaded_mode=True,
+        plugin_root=tmp_path,
+    ).load()
+
+    assert config.dsn == "AC0000000001"
 
 
 @pytest.mark.parametrize("callback_host", ["", "https://host.local", "host/name", "bad host"])

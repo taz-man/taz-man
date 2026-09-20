@@ -68,7 +68,12 @@ native plugin has passed an approved isolated hardware exercise.
   `data/apc-bootstrap.json` or PG3x-uploaded top-level `apc-bootstrap.json`, but
   rejects the configuration if both exist. An explicit non-default path is used
   exactly as configured. Bootstrap files must be regular, owned by the plugin
-  process account, and mode `0600`.
+  process account, single-linked, no larger than 64 KiB, and mode `0600`. On
+  POSIX, startup may normalize mode only for the exact PG3x-uploaded top-level
+  default candidate after descriptor-based checks and before reading it. It
+  never repairs an installed-default or explicit/custom path. PG3x extraction
+  can still expose the upload briefly before startup performs this hardening;
+  see `POLYGLOT_CONFIG.md` for the limitation and safe workflow.
 - Connected is false: verify LAN reachability and callback port 10275. Do not
   expose or forward the callback port to the Internet.
 - State Stale or Command Pending persists: the runtime clears commands after the

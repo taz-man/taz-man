@@ -74,23 +74,27 @@ def test_local_store_payload_contains_runtime_profile_and_operator_docs():
 
 
 def test_runtime_sources_are_lf_only_and_checkout_policy_preserves_them():
-    install = (ROOT / "install.sh").read_bytes()
-    build_hook = (ROOT / "hatch_build.py").read_bytes()
     attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
-    python_sources = [
+    shipped_text = [
+        ROOT / ".gitattributes",
+        ROOT / "install.sh",
+        ROOT / "hatch_build.py",
+        ROOT / "pyproject.toml",
+        ROOT / "requirements.txt",
+        ROOT / "server.json",
+        *(ROOT / "profile").rglob("*.xml"),
+        *(ROOT / "profile").rglob("*.txt"),
         *ROOT.glob("*.py"),
         *(ROOT / "src").rglob("*.py"),
         *(ROOT / "tests").rglob("*.py"),
+        *ROOT.glob("*.md"),
+        *(ROOT / "docs").rglob("*.md"),
     ]
 
-    assert b"\x0d\x0a" not in install
-    assert b"\x0d\x0a" not in build_hook
-    assert all(b"\x0d\x0a" not in path.read_bytes() for path in python_sources)
-    assert b"\x0d\x0a" not in (ROOT / "README.md").read_bytes()
-    assert b"\x0d\x0a" not in (ROOT / "POLYGLOT_CONFIG.md").read_bytes()
-    assert "*.sh text eol=lf" in attributes.splitlines()
-    assert "*.py text eol=lf" in attributes.splitlines()
-    assert "*.md text eol=lf" in attributes.splitlines()
+    crlf_files = [path.relative_to(ROOT) for path in shipped_text if b"\x0d\x0a" in path.read_bytes()]
+    assert crlf_files == []
+    for pattern in ("*.json", "*.md", "*.py", "*.sh", "*.toml", "*.txt", "*.xml"):
+        assert f"{pattern} text eol=lf" in attributes.splitlines()
 
 
 def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():

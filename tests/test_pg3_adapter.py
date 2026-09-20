@@ -166,6 +166,7 @@ def test_default_bootstrap_path_accepts_pg3x_uploaded_root_file(tmp_path, fake_u
     )
 
     assert store.path == uploaded
+    assert store.normalize_uploaded_mode is True
 
 
 def test_explicit_bootstrap_path_remains_authoritative(tmp_path, fake_udi):
@@ -184,6 +185,24 @@ def test_explicit_bootstrap_path_remains_authoritative(tmp_path, fake_udi):
     )
 
     assert store.path == explicit
+    assert store.normalize_uploaded_mode is False
+
+
+def test_installed_default_path_is_never_selected_for_mode_repair(tmp_path, fake_udi):
+    canonical = tmp_path / "data" / "apc-bootstrap.json"
+    canonical.parent.mkdir()
+    canonical.write_text("{}", encoding="utf-8")
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    _, store = app._settings(
+        {
+            "bootstrap_config_path": "data/apc-bootstrap.json",
+            "callback_host": "eisy.local",
+        }
+    )
+
+    assert store.path == canonical
+    assert store.normalize_uploaded_mode is False
 
 
 def test_bootstrap_path_resolution_does_not_hide_symlink(tmp_path, fake_udi):
