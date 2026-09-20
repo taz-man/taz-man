@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shutil
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 import tomllib
+import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -199,6 +201,7 @@ def test_runtime_sources_are_lf_only_and_checkout_policy_preserves_them():
         *(ROOT / "profile").rglob("*.xml"),
         *(ROOT / "profile").rglob("*.txt"),
         *ROOT.glob("*.py"),
+        *(ROOT / "build_tools").rglob("*.py"),
         *(ROOT / "src").rglob("*.py"),
         *(ROOT / "tests").rglob("*.py"),
         *ROOT.glob("*.md"),
@@ -258,3 +261,69 @@ def test_sdist_preserves_pg3_entrypoint_executable_modes(tmp_path):
         }
 
     assert modes == {"apc-poly.py": 0o755, "install.sh": 0o755}
+
+
+def test_wheel_normalization_is_host_independent_and_canonical(tmp_path):
+    from build_tools.wheel_normalizer import normalize_wheel
+
+    hashes = []
+    for create_system in (0, 3):
+        wheel = tmp_path / f"host-{create_system}.whl"
+        with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, payload in (
+                ("apc_pg3x/module.py", b"VALUE = 1\n"),
+                ("apc_pg3x-0.1.1.dist-info/RECORD", b"record\n"),
+            ):
+                member = zipfile.ZipInfo(name, (2026, 9, 20, 15, 36, 42))
+                member.create_system = create_system
+                member.external_attr = 0 if create_system == 0 else 0o100644 << 16
+                archive.writestr(member, payload, compress_type=zipfile.ZIP_DEFLATED)
+
+        normalize_wheel(wheel, timestamp=1_789_942_602)
+        hashes.append(hashlib.sha256(wheel.read_bytes()).hexdigest())
+
+        with zipfile.ZipFile(wheel) as archive:
+            members = archive.infolist()
+            assert [member.filename for member in members] == [
+                "apc_pg3x/module.py",
+                "apc_pg3x-0.1.1.dist-info/RECORD",
+            ]
+            assert all(member.create_system == 3 for member in members)
+            assert all(member.external_attr >> 16 == 0o100644 for member in members)
+            assert all(member.compress_type == zipfile.ZIP_STORED for member in members)
+
+    assert hashes[0] == hashes[1]
+
+
+def test_release_build_backend_is_pinned():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert project["build-system"]["requires"] == ["hatchling==1.32.3"]
+
+
+def test_built_wheel_has_canonical_zip_metadata(tmp_path):
+    hashes = []
+    for build_number in range(2):
+        output = tmp_path / str(build_number)
+        environment = os.environ.copy()
+        environment["SOURCE_DATE_EPOCH"] = "1789942602"
+        subprocess.run(
+            ["uv", "build", "--wheel", "--out-dir", str(output)],
+            cwd=ROOT,
+            env=environment,
+            check=True,
+        )
+        (wheel,) = output.glob("*.whl")
+        hashes.append(hashlib.sha256(wheel.read_bytes()).hexdigest())
+
+        with zipfile.ZipFile(wheel) as archive:
+            members = archive.infolist()
+            names = [member.filename for member in members]
+            assert names[-1].endswith(".dist-info/RECORD")
+            assert names[:-1] == sorted(names[:-1])
+            assert all(member.create_system == 3 for member in members)
+            assert all(member.external_attr >> 16 == 0o100644 for member in members)
+            assert all(member.compress_type == zipfile.ZIP_STORED for member in members)
+            assert {member.date_time for member in members} == {(2026, 9, 20, 22, 16, 42)}
+
+    assert hashes[0] == hashes[1]
