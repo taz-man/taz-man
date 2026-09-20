@@ -95,8 +95,22 @@ derived key, payload, or exception text:
 - `BOOTSTRAP_HARDEN`: descriptor-safe open, mode normalization, flush, or
   post-change verification was unavailable or failed.
 - `BOOTSTRAP_JSON`: the file cannot be read as UTF-8 JSON.
-- `BOOTSTRAP_SCHEMA`: required fields or the exact six writable Boolean mappings
-  are invalid.
+- `BOOTSTRAP_TOP_LEVEL`: the decoded JSON top level is not an object.
+- `BOOTSTRAP_REQUIRED_SECTIONS`: the object has none of the required bootstrap
+  sections.
+- `BOOTSTRAP_IDENTITY`: the device identity fields are absent or invalid.
+- `BOOTSTRAP_LAN_FIELDS`: the LAN address or key fields are absent or invalid.
+- `BOOTSTRAP_PROPERTY_COLLECTION`: the property collection is not a list of
+  exactly six entries.
+- `BOOTSTRAP_PROPERTY_ENTRY`: a property entry is not an object.
+- `BOOTSTRAP_PROPERTY_FIELDS`: a property's required role, name, or label is
+  absent or invalid.
+- `BOOTSTRAP_PROPERTY_ROLE`: the six roles do not match the supported controls.
+- `BOOTSTRAP_PROPERTY_TYPE`: a property is not Boolean.
+- `BOOTSTRAP_PROPERTY_WRITABLE`: a property is not writable.
+- `BOOTSTRAP_DUPLICATE_ROLE`: two or more property entries use the same role.
+- `BOOTSTRAP_DUPLICATE_NAME`: two or more property entries use the same device
+  property name.
 - `BOOTSTRAP_PATH`: a noncanonical configured path, root escape, or symlinked
   parent was rejected.
 - `CALLBACK_HOST`: the callback host is empty or is not a plain IP address or DNS

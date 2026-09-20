@@ -122,8 +122,10 @@ def test_bootstrap_requires_exactly_six_named_roles_and_redacts_key(tmp_path):
     payload["properties"].pop()
     path.write_text(json.dumps(payload), encoding="utf-8")
     path.chmod(0o600)
-    with pytest.raises(ConfigurationError, match="exactly six"):
+    with pytest.raises(ConfigurationError) as rejected:
         BootstrapConfigStore(path).load()
+
+    assert rejected.value.reason.value == "BOOTSTRAP_PROPERTY_COLLECTION"
 
 
 def test_missing_bootstrap_has_bounded_reason_code(tmp_path):
@@ -168,7 +170,77 @@ def test_invalid_bootstrap_schema_has_bounded_reason_code(tmp_path):
     with pytest.raises(ConfigurationError) as rejected:
         BootstrapConfigStore(path).load()
 
-    assert rejected.value.reason is RejectionReason.BOOTSTRAP_SCHEMA
+    assert rejected.value.reason.value == "BOOTSTRAP_REQUIRED_SECTIONS"
+
+
+def test_bootstrap_top_level_type_has_specific_bounded_reason(tmp_path):
+    path = tmp_path / "bootstrap.json"
+    path.write_text("[]", encoding="utf-8")
+    path.chmod(0o600)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(path).load()
+
+    assert rejected.value.reason.value == "BOOTSTRAP_TOP_LEVEL"
+
+
+def test_bootstrap_device_identity_has_specific_bounded_reason(tmp_path):
+    path = tmp_path / "bootstrap.json"
+    write_bootstrap(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload.pop("dsn")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    path.chmod(0o600)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(path).load()
+
+    assert rejected.value.reason.value == "BOOTSTRAP_IDENTITY"
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_reason"),
+    [
+        ("lan_fields", "BOOTSTRAP_LAN_FIELDS"),
+        ("property_collection", "BOOTSTRAP_PROPERTY_COLLECTION"),
+        ("property_entry", "BOOTSTRAP_PROPERTY_ENTRY"),
+        ("property_fields", "BOOTSTRAP_PROPERTY_FIELDS"),
+        ("property_role", "BOOTSTRAP_PROPERTY_ROLE"),
+        ("property_type", "BOOTSTRAP_PROPERTY_TYPE"),
+        ("property_writable", "BOOTSTRAP_PROPERTY_WRITABLE"),
+        ("duplicate_role", "BOOTSTRAP_DUPLICATE_ROLE"),
+        ("duplicate_name", "BOOTSTRAP_DUPLICATE_NAME"),
+    ],
+)
+def test_bootstrap_schema_stage_has_specific_bounded_reason(tmp_path, case, expected_reason):
+    path = tmp_path / "bootstrap.json"
+    write_bootstrap(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if case == "lan_fields":
+        payload.pop("lanip_key")
+    elif case == "property_collection":
+        payload["properties"] = []
+    elif case == "property_entry":
+        payload["properties"][0] = "not-an-object"
+    elif case == "property_fields":
+        payload["properties"][0].pop("label")
+    elif case == "property_role":
+        payload["properties"][0]["role"] = "unsupported"
+    elif case == "property_type":
+        payload["properties"][0]["base_type"] = "integer"
+    elif case == "property_writable":
+        payload["properties"][0]["writable"] = False
+    elif case == "duplicate_role":
+        payload["properties"][0]["role"] = payload["properties"][1]["role"]
+    elif case == "duplicate_name":
+        payload["properties"][0]["name"] = payload["properties"][1]["name"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    path.chmod(0o600)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(path).load()
+
+    assert rejected.value.reason.value == expected_reason
 
 
 def test_group_readable_bootstrap_has_bounded_reason_code(tmp_path, monkeypatch):

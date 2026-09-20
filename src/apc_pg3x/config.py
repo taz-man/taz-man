@@ -33,7 +33,18 @@ class RejectionReason(str, Enum):
     BOOTSTRAP_SIZE = "BOOTSTRAP_SIZE"
     BOOTSTRAP_HARDEN = "BOOTSTRAP_HARDEN"
     BOOTSTRAP_JSON = "BOOTSTRAP_JSON"
-    BOOTSTRAP_SCHEMA = "BOOTSTRAP_SCHEMA"
+    BOOTSTRAP_TOP_LEVEL = "BOOTSTRAP_TOP_LEVEL"
+    BOOTSTRAP_REQUIRED_SECTIONS = "BOOTSTRAP_REQUIRED_SECTIONS"
+    BOOTSTRAP_IDENTITY = "BOOTSTRAP_IDENTITY"
+    BOOTSTRAP_LAN_FIELDS = "BOOTSTRAP_LAN_FIELDS"
+    BOOTSTRAP_PROPERTY_COLLECTION = "BOOTSTRAP_PROPERTY_COLLECTION"
+    BOOTSTRAP_PROPERTY_ENTRY = "BOOTSTRAP_PROPERTY_ENTRY"
+    BOOTSTRAP_PROPERTY_FIELDS = "BOOTSTRAP_PROPERTY_FIELDS"
+    BOOTSTRAP_PROPERTY_ROLE = "BOOTSTRAP_PROPERTY_ROLE"
+    BOOTSTRAP_PROPERTY_TYPE = "BOOTSTRAP_PROPERTY_TYPE"
+    BOOTSTRAP_PROPERTY_WRITABLE = "BOOTSTRAP_PROPERTY_WRITABLE"
+    BOOTSTRAP_DUPLICATE_ROLE = "BOOTSTRAP_DUPLICATE_ROLE"
+    BOOTSTRAP_DUPLICATE_NAME = "BOOTSTRAP_DUPLICATE_NAME"
     BOOTSTRAP_PATH = "BOOTSTRAP_PATH"
     CALLBACK_HOST = "CALLBACK_HOST"
     CALLBACK_PORT = "CALLBACK_PORT"
@@ -44,7 +55,7 @@ class RejectionReason(str, Enum):
 class ConfigurationError(ValueError):
     """The protected bootstrap file is missing or unsafe."""
 
-    def __init__(self, message: str, reason: RejectionReason = RejectionReason.BOOTSTRAP_SCHEMA):
+    def __init__(self, message: str, reason: RejectionReason):
         super().__init__(message)
         self.reason = reason
 
@@ -69,7 +80,9 @@ class BootstrapConfig:
         for binding in self.properties:
             if binding.role == role:
                 return binding
-        raise ConfigurationError("required endpoint role is missing")
+        raise ConfigurationError(
+            "required endpoint role is missing", RejectionReason.BOOTSTRAP_PROPERTY_ROLE
+        )
 
     @property
     def property_names(self) -> tuple[str, ...]:
@@ -101,36 +114,75 @@ class BootstrapConfigStore:
                 "bootstrap configuration is invalid", RejectionReason.BOOTSTRAP_JSON
             ) from None
         if not isinstance(raw, dict):
-            raise ConfigurationError("bootstrap configuration is invalid")
+            raise ConfigurationError(
+                "bootstrap configuration is invalid",
+                RejectionReason.BOOTSTRAP_TOP_LEVEL,
+            )
+        schema_keys = (
+            "dsn",
+            "product_name",
+            "address",
+            "lanip_key_id",
+            "lanip_key",
+            "properties",
+        )
+        if not any(key in raw for key in schema_keys):
+            raise ConfigurationError(
+                "bootstrap configuration is missing required sections",
+                RejectionReason.BOOTSTRAP_REQUIRED_SECTIONS,
+            )
 
-        dsn = _required_text(raw, "dsn")
-        product_name = _required_text(raw, "product_name")
-        address = _required_text(raw, "address")
-        key_id = _required_text(raw, "lanip_key_id")
-        lan_key = _required_text(raw, "lanip_key")
+        dsn = _required_text(raw, "dsn", RejectionReason.BOOTSTRAP_IDENTITY)
+        product_name = _required_text(raw, "product_name", RejectionReason.BOOTSTRAP_IDENTITY)
+        address = _required_text(raw, "address", RejectionReason.BOOTSTRAP_LAN_FIELDS)
+        key_id = _required_text(raw, "lanip_key_id", RejectionReason.BOOTSTRAP_LAN_FIELDS)
+        lan_key = _required_text(raw, "lanip_key", RejectionReason.BOOTSTRAP_LAN_FIELDS)
         entries = raw.get("properties")
         if not isinstance(entries, list) or len(entries) != len(EXPECTED_ROLES):
-            raise ConfigurationError("exactly six endpoint properties are required")
+            raise ConfigurationError(
+                "endpoint property collection is invalid",
+                RejectionReason.BOOTSTRAP_PROPERTY_COLLECTION,
+            )
 
         bindings: list[PropertyBinding] = []
         for entry in entries:
             if not isinstance(entry, dict):
-                raise ConfigurationError("endpoint property metadata is invalid")
-            role = _required_text(entry, "role")
-            name = _required_text(entry, "name")
-            label = _required_text(entry, "label")
+                raise ConfigurationError(
+                    "endpoint property metadata is invalid",
+                    RejectionReason.BOOTSTRAP_PROPERTY_ENTRY,
+                )
+            role = _required_text(entry, "role", RejectionReason.BOOTSTRAP_PROPERTY_FIELDS)
+            name = _required_text(entry, "name", RejectionReason.BOOTSTRAP_PROPERTY_FIELDS)
+            label = _required_text(entry, "label", RejectionReason.BOOTSTRAP_PROPERTY_FIELDS)
             if entry.get("base_type", "boolean") != "boolean":
-                raise ConfigurationError("endpoint properties must be Boolean")
+                raise ConfigurationError(
+                    "endpoint property type is invalid",
+                    RejectionReason.BOOTSTRAP_PROPERTY_TYPE,
+                )
             if entry.get("writable", True) is not True:
-                raise ConfigurationError("endpoint properties must be writable")
+                raise ConfigurationError(
+                    "endpoint property writability is invalid",
+                    RejectionReason.BOOTSTRAP_PROPERTY_WRITABLE,
+                )
             bindings.append(PropertyBinding(role=role, name=name, label=label))
 
         roles = tuple(binding.role for binding in bindings)
         names = tuple(binding.name for binding in bindings)
-        if set(roles) != set(EXPECTED_ROLES) or len(set(roles)) != len(EXPECTED_ROLES):
-            raise ConfigurationError("endpoint roles must match the six supported controls")
+        if len(set(roles)) != len(EXPECTED_ROLES):
+            raise ConfigurationError(
+                "endpoint property roles are duplicated",
+                RejectionReason.BOOTSTRAP_DUPLICATE_ROLE,
+            )
+        if set(roles) != set(EXPECTED_ROLES):
+            raise ConfigurationError(
+                "endpoint property roles are invalid",
+                RejectionReason.BOOTSTRAP_PROPERTY_ROLE,
+            )
         if len(set(names)) != len(EXPECTED_ROLES):
-            raise ConfigurationError("endpoint property names must be unique")
+            raise ConfigurationError(
+                "endpoint property names are duplicated",
+                RejectionReason.BOOTSTRAP_DUPLICATE_NAME,
+            )
 
         ordered = tuple(next(item for item in bindings if item.role == role) for role in EXPECTED_ROLES)
         return BootstrapConfig(
@@ -285,10 +337,10 @@ class BootstrapConfigStore:
             )
 
 
-def _required_text(source: dict, key: str) -> str:
+def _required_text(source: dict, key: str, reason: RejectionReason) -> str:
     value = source.get(key)
     if not isinstance(value, str) or not value.strip():
-        raise ConfigurationError("bootstrap configuration is missing required fields")
+        raise ConfigurationError("bootstrap configuration is missing required fields", reason)
     return value.strip()
 
 
