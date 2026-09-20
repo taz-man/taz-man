@@ -82,6 +82,7 @@ def test_runtime_sources_are_lf_only_and_checkout_policy_preserves_them():
         ROOT / "pyproject.toml",
         ROOT / "requirements.txt",
         ROOT / "server.json",
+        ROOT / "uv.lock",
         *(ROOT / "profile").rglob("*.xml"),
         *(ROOT / "profile").rglob("*.txt"),
         *ROOT.glob("*.py"),
@@ -93,7 +94,7 @@ def test_runtime_sources_are_lf_only_and_checkout_policy_preserves_them():
 
     crlf_files = [path.relative_to(ROOT) for path in shipped_text if b"\x0d\x0a" in path.read_bytes()]
     assert crlf_files == []
-    for pattern in ("*.json", "*.md", "*.py", "*.sh", "*.toml", "*.txt", "*.xml"):
+    for pattern in ("*.json", "*.md", "*.py", "*.sh", "*.toml", "*.txt", "*.xml", "uv.lock"):
         assert f"{pattern} text eol=lf" in attributes.splitlines()
 
 
