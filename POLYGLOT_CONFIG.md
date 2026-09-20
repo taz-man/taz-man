@@ -68,11 +68,11 @@ The file format is:
 
 Provide exactly one entry for each role: `led`, `outlet_1`, `outlet_2`,
 `outlet_3`, `usb_1`, and `usb_2`. Order is irrelevant. Never enter account
-credentials or cloud tokens. PG3x custom parameters persist only the protected
-file path and non-secret timing/network settings; secret material remains in the
-owner-only file. Runtime restart data contains only DSN, last address, and role
-names. Logs and notices redact all identities, addresses, keys, payloads, and
-dynamic exception text.
+credentials or cloud tokens. PG3x custom parameters persist only non-secret
+timing/network settings; the canonical bootstrap path is fixed in code, and
+secret material remains in the owner-only file. Runtime restart data contains
+only DSN, last address, and role names. Logs and notices redact all identities,
+addresses, keys, payloads, and dynamic exception text.
 
 On/Off commands remain pending until authenticated telemetry confirms them.
 Timeout/retry failure retains the last confirmed state and marks it stale. An

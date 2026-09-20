@@ -1,13 +1,103 @@
 import json
+import os
+import shutil
+import stat
 import subprocess
+import sys
 import tarfile
 import tomllib
 from pathlib import Path
 from xml.etree import ElementTree
 
+import pytest
+
 import apc_pg3x
+from apc_pg3x import installer
 
 ROOT = Path(__file__).parents[1]
+
+
+def _run_installer(plugin_root: Path) -> subprocess.CompletedProcess[str]:
+    shutil.copy2(ROOT / "install.sh", plugin_root / "install.sh")
+    shutil.copytree(ROOT / "src", plugin_root / "src")
+    fake_bin = plugin_root / "fake-bin"
+    fake_bin.mkdir()
+    python_wrapper = fake_bin / "python3"
+    python_wrapper.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 0; fi\n'
+        'exec "$REAL_PYTHON" "$@"\n',
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o755)
+    environment = os.environ.copy()
+    environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
+    environment["REAL_PYTHON"] = sys.executable
+    return subprocess.run(
+        ["sh", "install.sh"],
+        cwd=plugin_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX installer safety regression")
+def test_installer_rejects_symlinked_data_directory_without_mutating_target(tmp_path):
+    plugin_root = tmp_path / "plugin"
+    external_data = tmp_path / "external-data"
+    plugin_root.mkdir()
+    external_data.mkdir(mode=0o755)
+    (plugin_root / "data").symlink_to(external_data, target_is_directory=True)
+
+    result = _run_installer(plugin_root)
+
+    assert result.returncode != 0
+    assert stat.S_IMODE(external_data.stat().st_mode) == 0o755
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX installer safety regression")
+@pytest.mark.parametrize("link_kind", ["symlink", "hardlink"])
+def test_installer_does_not_mutate_linked_bootstrap_target(tmp_path, link_kind):
+    plugin_root = tmp_path / "plugin"
+    data_directory = plugin_root / "data"
+    external_bootstrap = tmp_path / "external-bootstrap.json"
+    data_directory.mkdir(parents=True, mode=0o700)
+    external_bootstrap.write_text("{}", encoding="utf-8")
+    external_bootstrap.chmod(0o644)
+    bootstrap = data_directory / "apc-bootstrap.json"
+    if link_kind == "symlink":
+        bootstrap.symlink_to(external_bootstrap)
+    else:
+        os.link(external_bootstrap, bootstrap)
+
+    result = _run_installer(plugin_root)
+
+    assert result.returncode == 0
+    assert stat.S_IMODE(external_bootstrap.stat().st_mode) == 0o644
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX installer safety regression")
+def test_installer_rejects_data_path_replacement_during_setup(tmp_path, monkeypatch):
+    plugin_root = tmp_path / "plugin"
+    data_directory = plugin_root / "data"
+    external_data = tmp_path / "external-data"
+    data_directory.mkdir(parents=True, mode=0o755)
+    external_data.mkdir(mode=0o755)
+    original_fchmod = installer.os.fchmod
+
+    def replace_data_path(descriptor, mode):
+        original_fchmod(descriptor, mode)
+        data_directory.rename(plugin_root / "opened-data")
+        data_directory.symlink_to(external_data, target_is_directory=True)
+
+    monkeypatch.setattr(installer.os, "fchmod", replace_data_path)
+
+    with pytest.raises(installer.InstallerSafetyError):
+        installer.prepare_data_directory(plugin_root)
+
+    assert stat.S_IMODE(external_data.stat().st_mode) == 0o755
 
 
 def test_server_manifest_is_pg3x_installable():
@@ -87,6 +177,7 @@ def test_local_store_payload_contains_runtime_profile_and_operator_docs():
         "profile/nls/en_us.txt",
         "src/apc_pg3x/pg3.py",
         "src/apc_pg3x/runtime.py",
+        "src/apc_pg3x/installer.py",
         "src/apc_pg3x/callback_server.py",
         "src/apc_pg3x/protocol.py",
     ]
@@ -129,6 +220,7 @@ def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():
 
 def test_operator_docs_define_canonical_upload_and_truthful_lifecycle():
     config_doc = (ROOT / "POLYGLOT_CONFIG.md").read_text(encoding="utf-8")
+    normalized_config_doc = " ".join(config_doc.split())
 
     assert "data/apc-bootstrap.json" in config_doc
     assert "Persistent Folder" in config_doc
@@ -145,6 +237,9 @@ def test_operator_docs_define_canonical_upload_and_truthful_lifecycle():
     assert "`0.1.1`" in config_doc
     assert "BOOTSTRAP_OWNER" in config_doc
     assert "CALLBACK_HOST" in config_doc
+    assert "custom parameters persist only non-secret timing/network settings" in normalized_config_doc
+    assert "canonical bootstrap path is fixed in code" in normalized_config_doc
+    assert "custom parameters persist only the protected file path" not in normalized_config_doc
 
 
 def test_sdist_preserves_pg3_entrypoint_executable_modes(tmp_path):
