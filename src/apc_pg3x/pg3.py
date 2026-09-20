@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .config import BootstrapConfigStore, ConfigurationError
+from .config import BootstrapConfigStore, ConfigurationError, RejectionReason
 from .runtime import PluginRuntime, RuntimeSettings
 
 _LOGGER = logging.getLogger(__name__)
+_DEFAULT_BOOTSTRAP_PATH = "data/apc-bootstrap.json"
+_PG3X_UPLOADED_BOOTSTRAP_PATH = "apc-bootstrap.json"
 
 
 class Pg3Publisher:
@@ -134,17 +137,24 @@ class Pg3Application:
                 publisher=self.publisher,
                 restart_state=dict(self.restart_data.items()),
             )
-        except (ConfigurationError, OSError, TypeError, ValueError):
-            self.interface.Notices["configuration"] = (
-                "Configuration is incomplete or the protected bootstrap file is unsafe."
-            )
-            _LOGGER.error("APC plugin configuration rejected")
+        except ConfigurationError as error:
+            self._reject_configuration(error.reason)
+            return
+        except (TypeError, ValueError):
+            self._reject_configuration(RejectionReason.SETTINGS)
+            return
+        except Exception:  # noqa: BLE001 - fail closed with a bounded diagnostic
+            self._reject_configuration(RejectionReason.STARTUP)
             return
         self.runtime = runtime
         self.publisher.runtime = runtime
         self.restart_data.clear()
         self.restart_data.update(runtime.public_restart_state())
         self.interface.Notices.pop("configuration", None)
+
+    def _reject_configuration(self, reason: RejectionReason) -> None:
+        self.interface.Notices["configuration"] = f"Configuration rejected [{reason.value}]."
+        _LOGGER.error("APC plugin configuration rejected [%s]", reason.value)
 
     def load_restart_data(self, values: dict[str, object] | None) -> None:
         self.restart_data.load(values)
@@ -167,10 +177,27 @@ class Pg3Application:
     def _settings(
         self, params: dict[str, object]
     ) -> tuple[RuntimeSettings, BootstrapConfigStore]:
-        relative_path = str(params.get("bootstrap_config_path", "data/apc-bootstrap.json"))
-        path = (self.plugin_root / relative_path).resolve()
+        relative_path = str(params.get("bootstrap_config_path", _DEFAULT_BOOTSTRAP_PATH))
+        path = Path(os.path.abspath(self.plugin_root / relative_path))
         if not path.is_relative_to(self.plugin_root):
-            raise ConfigurationError("bootstrap path must remain under the plugin directory")
+            raise ConfigurationError(
+                "bootstrap path must remain under the plugin directory",
+                RejectionReason.BOOTSTRAP_PATH,
+            )
+        if _has_symlink_parent(self.plugin_root, path):
+            raise ConfigurationError(
+                "bootstrap path parent is unsafe", RejectionReason.BOOTSTRAP_PATH
+            )
+        if relative_path == _DEFAULT_BOOTSTRAP_PATH:
+            uploaded_path = self.plugin_root / _PG3X_UPLOADED_BOOTSTRAP_PATH
+            canonical_present = path.exists() or path.is_symlink()
+            uploaded_present = uploaded_path.exists() or uploaded_path.is_symlink()
+            if canonical_present and uploaded_present:
+                raise ConfigurationError(
+                    "bootstrap path is ambiguous", RejectionReason.BOOTSTRAP_AMBIGUOUS
+                )
+            if not canonical_present and uploaded_present:
+                path = uploaded_path
         callback_host = str(params.get("callback_host", "")).strip()
         settings = RuntimeSettings(
             callback_host=callback_host,
@@ -193,6 +220,15 @@ def _number(values: dict[str, object], name: str, default: float) -> float:
     if isinstance(value, bool):
         raise TypeError("invalid numeric parameter")
     return float(value)
+
+
+def _has_symlink_parent(root: Path, candidate: Path) -> bool:
+    current = root
+    for part in candidate.relative_to(root).parts[:-1]:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def run() -> None:

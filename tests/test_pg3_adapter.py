@@ -1,10 +1,11 @@
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from apc_pg3x import pg3
-from apc_pg3x.config import EXPECTED_ROLES, ConfigurationError
+from apc_pg3x.config import EXPECTED_ROLES, ConfigurationError, RejectionReason
 
 
 class FakeNode:
@@ -141,10 +142,149 @@ def test_pg3_application_subscribes_and_creates_fixed_topology(monkeypatch, tmp_
 
 def test_pg3_application_rejects_bootstrap_path_escape(tmp_path, fake_udi):
     app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
-    with pytest.raises(ConfigurationError, match="under the plugin"):
+    with pytest.raises(ConfigurationError, match="under the plugin") as rejected:
         app._settings(
             {
                 "bootstrap_config_path": str(Path("..") / "secret.json"),
                 "callback_host": "192.0.2.5",
             }
         )
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_PATH
+
+
+def test_default_bootstrap_path_accepts_pg3x_uploaded_root_file(tmp_path, fake_udi):
+    uploaded = tmp_path / "apc-bootstrap.json"
+    uploaded.write_text("{}", encoding="utf-8")
+    uploaded.chmod(0o600)
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    _, store = app._settings(
+        {
+            "bootstrap_config_path": "data/apc-bootstrap.json",
+            "callback_host": "192.0.2.5",
+        }
+    )
+
+    assert store.path == uploaded
+
+
+def test_explicit_bootstrap_path_remains_authoritative(tmp_path, fake_udi):
+    uploaded = tmp_path / "apc-bootstrap.json"
+    uploaded.write_text("{}", encoding="utf-8")
+    explicit = tmp_path / "protected" / "custom.json"
+    explicit.parent.mkdir()
+    explicit.write_text("{}", encoding="utf-8")
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    _, store = app._settings(
+        {
+            "bootstrap_config_path": "protected/custom.json",
+            "callback_host": "eisy.local",
+        }
+    )
+
+    assert store.path == explicit
+
+
+def test_bootstrap_path_resolution_does_not_hide_symlink(tmp_path, fake_udi):
+    target = tmp_path / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    link = tmp_path / "bootstrap.json"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    _, store = app._settings(
+        {
+            "bootstrap_config_path": "bootstrap.json",
+            "callback_host": "eisy.local",
+        }
+    )
+
+    assert store.path == link
+    with pytest.raises(ConfigurationError) as rejected:
+        store.load()
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_TYPE
+
+
+def test_default_bootstrap_path_rejects_ambiguous_upload_locations(tmp_path, fake_udi):
+    canonical = tmp_path / "data" / "apc-bootstrap.json"
+    canonical.parent.mkdir()
+    canonical.write_text("{}", encoding="utf-8")
+    uploaded = tmp_path / "apc-bootstrap.json"
+    uploaded.write_text("{}", encoding="utf-8")
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    with pytest.raises(ConfigurationError, match="ambiguous") as rejected:
+        app._settings(
+            {
+                "bootstrap_config_path": "data/apc-bootstrap.json",
+                "callback_host": "192.0.2.5",
+            }
+        )
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_AMBIGUOUS
+
+
+def test_configuration_rejection_logs_only_bounded_reason_code(
+    tmp_path, fake_udi, caplog
+):
+    sensitive_path = "data/private-device-identity.json"
+    sensitive_host = "private-callback.local"
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    with caplog.at_level(logging.ERROR, logger="apc_pg3x.pg3"):
+        app.configure(
+            {
+                "bootstrap_config_path": sensitive_path,
+                "callback_host": sensitive_host,
+            }
+        )
+
+    assert caplog.messages == [
+        "APC plugin configuration rejected [BOOTSTRAP_MISSING]"
+    ]
+    assert app.interface.Notices["configuration"] == (
+        "Configuration rejected [BOOTSTRAP_MISSING]."
+    )
+    rendered = " ".join(caplog.messages + list(app.interface.Notices.values()))
+    assert sensitive_path not in rendered
+    assert sensitive_host not in rendered
+
+
+def test_unexpected_startup_failure_does_not_log_dynamic_exception(
+    monkeypatch, tmp_path, fake_udi, caplog
+):
+    sensitive_exception = "runtime contained sensitive device material"
+
+    def fail_runtime(**_kwargs):
+        raise RuntimeError(sensitive_exception)
+
+    monkeypatch.setattr(pg3, "PluginRuntime", fail_runtime)
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    with caplog.at_level(logging.ERROR, logger="apc_pg3x.pg3"):
+        app.configure(
+            {
+                "bootstrap_config_path": "data/apc-bootstrap.json",
+                "callback_host": "eisy.local",
+            }
+        )
+
+    assert caplog.messages == ["APC plugin configuration rejected [STARTUP]"]
+    assert sensitive_exception not in " ".join(caplog.messages)
+
+
+def test_invalid_numeric_setting_logs_only_settings_reason(tmp_path, fake_udi, caplog):
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+
+    with caplog.at_level(logging.ERROR, logger="apc_pg3x.pg3"):
+        app.configure(
+            {
+                "callback_host": "eisy.local",
+                "callback_port": "not-a-port",
+            }
+        )
+
+    assert caplog.messages == ["APC plugin configuration rejected [SETTINGS]"]

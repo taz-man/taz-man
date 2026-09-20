@@ -6,6 +6,7 @@ import json
 import os
 import stat
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 EXPECTED_ROLES = (
@@ -18,8 +19,29 @@ EXPECTED_ROLES = (
 )
 
 
+class RejectionReason(str, Enum):
+    """Bounded, non-sensitive startup rejection diagnostics."""
+
+    BOOTSTRAP_MISSING = "BOOTSTRAP_MISSING"
+    BOOTSTRAP_TYPE = "BOOTSTRAP_TYPE"
+    BOOTSTRAP_OWNER = "BOOTSTRAP_OWNER"
+    BOOTSTRAP_MODE = "BOOTSTRAP_MODE"
+    BOOTSTRAP_JSON = "BOOTSTRAP_JSON"
+    BOOTSTRAP_SCHEMA = "BOOTSTRAP_SCHEMA"
+    BOOTSTRAP_PATH = "BOOTSTRAP_PATH"
+    BOOTSTRAP_AMBIGUOUS = "BOOTSTRAP_AMBIGUOUS"
+    CALLBACK_HOST = "CALLBACK_HOST"
+    CALLBACK_PORT = "CALLBACK_PORT"
+    SETTINGS = "SETTINGS"
+    STARTUP = "STARTUP"
+
+
 class ConfigurationError(ValueError):
     """The protected bootstrap file is missing or unsafe."""
+
+    def __init__(self, message: str, reason: RejectionReason = RejectionReason.BOOTSTRAP_SCHEMA):
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,17 +80,33 @@ class BootstrapConfigStore:
 
     def load(self) -> BootstrapConfig:
         try:
-            file_stat = self.path.lstat()
+            file_stat = _lstat(self.path)
         except OSError:
-            raise ConfigurationError("bootstrap configuration is unavailable") from None
+            raise ConfigurationError(
+                "bootstrap configuration is unavailable", RejectionReason.BOOTSTRAP_MISSING
+            ) from None
         if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
-            raise ConfigurationError("bootstrap configuration must be a regular file")
-        if self.require_owner_only and os.name == "posix" and file_stat.st_mode & 0o077:
-            raise ConfigurationError("bootstrap configuration must use mode 0600")
+            raise ConfigurationError(
+                "bootstrap configuration must be a regular file",
+                RejectionReason.BOOTSTRAP_TYPE,
+            )
+        if self.require_owner_only and _is_posix():
+            if file_stat.st_uid != os.geteuid():
+                raise ConfigurationError(
+                    "bootstrap configuration owner is invalid",
+                    RejectionReason.BOOTSTRAP_OWNER,
+                )
+            if file_stat.st_mode & 0o077:
+                raise ConfigurationError(
+                    "bootstrap configuration must use mode 0600",
+                    RejectionReason.BOOTSTRAP_MODE,
+                )
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
-            raise ConfigurationError("bootstrap configuration is invalid") from None
+            raise ConfigurationError(
+                "bootstrap configuration is invalid", RejectionReason.BOOTSTRAP_JSON
+            ) from None
         if not isinstance(raw, dict):
             raise ConfigurationError("bootstrap configuration is invalid")
 
@@ -117,3 +155,11 @@ def _required_text(source: dict, key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigurationError("bootstrap configuration is missing required fields")
     return value.strip()
+
+
+def _lstat(path: Path):
+    return path.lstat()
+
+
+def _is_posix() -> bool:
+    return os.name == "posix"

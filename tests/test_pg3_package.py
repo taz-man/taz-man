@@ -86,8 +86,11 @@ def test_runtime_sources_are_lf_only_and_checkout_policy_preserves_them():
     assert b"\x0d\x0a" not in install
     assert b"\x0d\x0a" not in build_hook
     assert all(b"\x0d\x0a" not in path.read_bytes() for path in python_sources)
+    assert b"\x0d\x0a" not in (ROOT / "README.md").read_bytes()
+    assert b"\x0d\x0a" not in (ROOT / "POLYGLOT_CONFIG.md").read_bytes()
     assert "*.sh text eol=lf" in attributes.splitlines()
     assert "*.py text eol=lf" in attributes.splitlines()
+    assert "*.md text eol=lf" in attributes.splitlines()
 
 
 def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():
@@ -95,6 +98,17 @@ def test_operator_docs_distinguish_connectivity_from_telemetry_freshness():
 
     assert "retained until a transport failure" in readme
     assert "Connected` can therefore be true while `State Stale` is true" in readme
+
+
+def test_operator_docs_explain_safe_pg3x_upload_resolution_and_reason_codes():
+    config_doc = (ROOT / "POLYGLOT_CONFIG.md").read_text(encoding="utf-8")
+
+    assert "apc-bootstrap.json" in config_doc
+    assert "data/apc-bootstrap.json" in config_doc
+    assert "BOOTSTRAP_AMBIGUOUS" in config_doc
+    assert "BOOTSTRAP_OWNER" in config_doc
+    assert "CALLBACK_HOST" in config_doc
+    assert "explicit" in config_doc
 
 
 def test_sdist_preserves_pg3_entrypoint_executable_modes(tmp_path):

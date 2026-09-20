@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -16,6 +18,7 @@ from .config import (
     BootstrapConfig,
     BootstrapConfigStore,
     ConfigurationError,
+    RejectionReason,
 )
 from .device import (
     AylaLanDevice,
@@ -29,6 +32,17 @@ from .transport import AylaLanTransport
 
 _LOGGER = logging.getLogger(__name__)
 CONTROLLER_ENDPOINT = "controller"
+_HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+
+
+def _valid_callback_host(value: str) -> bool:
+    if not value or value != value.strip() or len(value) > 253:
+        return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return all(_HOST_LABEL.fullmatch(label) for label in value.split("."))
+    return True
 
 
 class NodePublisher(Protocol):
@@ -52,10 +66,14 @@ class RuntimeSettings:
     request_timeout: float = 3.0
 
     def __post_init__(self) -> None:
-        if not self.callback_host:
-            raise ValueError("callback_host is required")
+        if not _valid_callback_host(self.callback_host):
+            raise ConfigurationError(
+                "callback_host is invalid", RejectionReason.CALLBACK_HOST
+            )
         if not 1 <= self.callback_port <= 65535:
-            raise ValueError("callback_port is out of range")
+            raise ConfigurationError(
+                "callback_port is out of range", RejectionReason.CALLBACK_PORT
+            )
 
 
 class BootstrapLocationResolver:

@@ -4,7 +4,23 @@ The plugin expects a protected bootstrap file at `data/apc-bootstrap.json`. It
 contains the already-provisioned strip's stable identity, current LAN address,
 six discovered Boolean property mappings, and Ayla LAN key material. Set file
 mode `0600`; startup rejects a symlink, non-regular file, or broader permissions
-on eisy. The containing `data` directory is installed as `0700`.
+on eisy. The file must also be owned by the account running the plugin. The
+containing `data` directory is installed as `0700`.
+
+## PG3x ZIP upload layout
+
+PG3x's file-upload control extracts ZIP members at the plugin root. For the
+default `bootstrap_config_path`, the plugin checks exactly two deterministic
+locations: the installed `data/apc-bootstrap.json` path and the uploaded
+top-level `apc-bootstrap.json` path. It accepts the one that exists. If both
+exist, startup fails with `BOOTSTRAP_AMBIGUOUS`; it never guesses between them.
+Paths containing `..`, paths outside the plugin root, and paths whose parent is
+a symlink are rejected. A final-component symlink is also rejected by the
+protected-file check.
+
+An explicit non-default `bootstrap_config_path` remains authoritative: no
+fallback is attempted, and the configured path must remain beneath the plugin
+root. The same owner, regular-file, and `0600` checks apply.
 
 Do not commit that file. Account credentials are not intended to remain configured after bootstrap.
 
@@ -46,3 +62,25 @@ Timeout/retry failure retains the last confirmed state and marks it stale. An
 actual installation or control exercise requires explicit human approval of a
 named noncritical load; hardware validation and production-store publication are
 not implied by the automated test suite.
+
+## Startup reason codes
+
+Startup notices and logs contain only one bounded code, never a configured path,
+host, device identity, address, property name, key identifier, LAN key, token,
+derived key, payload, or exception text:
+
+- `BOOTSTRAP_MISSING`: no file exists at the selected location.
+- `BOOTSTRAP_TYPE`: the selected object is not a regular file or is a symlink.
+- `BOOTSTRAP_OWNER`: the file is not owned by the plugin process account.
+- `BOOTSTRAP_MODE`: group or world permission bits are present.
+- `BOOTSTRAP_JSON`: the file cannot be read as UTF-8 JSON.
+- `BOOTSTRAP_SCHEMA`: required fields or the exact six writable Boolean mappings
+  are invalid.
+- `BOOTSTRAP_PATH`: a configured path escapes the plugin root or traverses a
+  symlinked parent.
+- `BOOTSTRAP_AMBIGUOUS`: both documented default candidates exist.
+- `CALLBACK_HOST`: the callback host is empty or is not a plain IP address or DNS
+  hostname.
+- `CALLBACK_PORT`: the callback port is outside 1-65535.
+- `SETTINGS`: another bounded numeric/runtime setting is invalid.
+- `STARTUP`: a non-configuration operating-system startup failure occurred.

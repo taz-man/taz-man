@@ -1,11 +1,19 @@
 import base64
 import json
 import socket
+import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from apc_pg3x.config import EXPECTED_ROLES, BootstrapConfigStore, ConfigurationError
+from apc_pg3x import config as config_module
+from apc_pg3x.config import (
+    EXPECTED_ROLES,
+    BootstrapConfigStore,
+    ConfigurationError,
+    RejectionReason,
+)
 from apc_pg3x.runtime import PluginRuntime, RuntimeSettings
 from apc_pg3x.transport import ProtocolError
 
@@ -116,6 +124,101 @@ def test_bootstrap_requires_exactly_six_named_roles_and_redacts_key(tmp_path):
     path.chmod(0o600)
     with pytest.raises(ConfigurationError, match="exactly six"):
         BootstrapConfigStore(path).load()
+
+
+def test_missing_bootstrap_has_bounded_reason_code(tmp_path):
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(tmp_path / "absent.json").load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_MISSING
+    assert rejected.value.reason.value == "BOOTSTRAP_MISSING"
+
+
+def test_all_rejection_reason_codes_are_bounded_identifiers():
+    codes = [reason.value for reason in RejectionReason]
+
+    assert len(codes) == len(set(codes))
+    assert all(len(code) <= 32 for code in codes)
+    assert all(code.replace("_", "").isalpha() and code == code.upper() for code in codes)
+
+
+def test_non_regular_bootstrap_has_bounded_reason_code(tmp_path):
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(tmp_path).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_TYPE
+
+
+def test_malformed_bootstrap_json_has_bounded_reason_code(tmp_path):
+    path = tmp_path / "bootstrap.json"
+    path.write_text("not-json", encoding="utf-8")
+    path.chmod(0o600)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(path).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_JSON
+
+
+def test_invalid_bootstrap_schema_has_bounded_reason_code(tmp_path):
+    path = tmp_path / "bootstrap.json"
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o600)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        BootstrapConfigStore(path).load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_SCHEMA
+
+
+def test_group_readable_bootstrap_has_bounded_reason_code(tmp_path, monkeypatch):
+    path = tmp_path / "bootstrap.json"
+    path.write_text("{}", encoding="utf-8")
+    store = BootstrapConfigStore(path)
+    file_stat = SimpleNamespace(st_mode=stat.S_IFREG | 0o640, st_uid=1000)
+    monkeypatch.setattr(config_module, "_is_posix", lambda: True, raising=False)
+    monkeypatch.setattr(config_module, "_lstat", lambda _path: file_stat, raising=False)
+    monkeypatch.setattr(config_module.os, "geteuid", lambda: 1000, raising=False)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        store.load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_MODE
+
+
+def test_foreign_owned_bootstrap_has_bounded_reason_code(tmp_path, monkeypatch):
+    path = tmp_path / "bootstrap.json"
+    path.write_text("{}", encoding="utf-8")
+    store = BootstrapConfigStore(path)
+    file_stat = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1001)
+    monkeypatch.setattr(config_module, "_is_posix", lambda: True, raising=False)
+    monkeypatch.setattr(config_module, "_lstat", lambda _path: file_stat, raising=False)
+    monkeypatch.setattr(config_module.os, "geteuid", lambda: 1000, raising=False)
+
+    with pytest.raises(ConfigurationError) as rejected:
+        store.load()
+
+    assert rejected.value.reason is RejectionReason.BOOTSTRAP_OWNER
+
+
+@pytest.mark.parametrize("callback_host", ["", "https://host.local", "host/name", "bad host"])
+def test_invalid_callback_host_has_bounded_reason_code(callback_host):
+    with pytest.raises(ConfigurationError) as rejected:
+        RuntimeSettings(callback_host=callback_host)
+
+    assert rejected.value.reason is RejectionReason.CALLBACK_HOST
+
+
+@pytest.mark.parametrize("callback_host", ["192.0.2.5", "eisy.local", "2001:db8::5"])
+def test_secure_callback_host_forms_are_accepted(callback_host):
+    assert RuntimeSettings(callback_host=callback_host).callback_host == callback_host
+
+
+def test_invalid_callback_port_has_bounded_reason_code():
+    with pytest.raises(ConfigurationError) as rejected:
+        RuntimeSettings(callback_host="eisy.local", callback_port=0)
+
+    assert rejected.value.reason is RejectionReason.CALLBACK_PORT
 
 
 def test_runtime_recreates_one_controller_and_six_stable_children(tmp_path):

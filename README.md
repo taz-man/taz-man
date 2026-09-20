@@ -62,9 +62,13 @@ native plugin has passed an approved isolated hardware exercise.
 
 ## Troubleshooting
 
-- Configuration notice: confirm `callback_host` is the eisy LAN address visible
-  to the strip and that `data/apc-bootstrap.json` exists with owner-only mode
-  `0600`.
+- Configuration notice: use its bounded reason code with the table in
+  `POLYGLOT_CONFIG.md`. Confirm `callback_host` is a plain IP address or hostname
+  visible to the strip. For the default path, startup accepts either installed
+  `data/apc-bootstrap.json` or PG3x-uploaded top-level `apc-bootstrap.json`, but
+  rejects the configuration if both exist. An explicit non-default path is used
+  exactly as configured. Bootstrap files must be regular, owned by the plugin
+  process account, and mode `0600`.
 - Connected is false: verify LAN reachability and callback port 10275. Do not
   expose or forward the callback port to the Internet.
 - State Stale or Command Pending persists: the runtime clears commands after the
@@ -72,5 +76,7 @@ native plugin has passed an approved isolated hardware exercise.
   Discover. It never fabricates success.
 - DHCP change: update only the protected bootstrap `address`; the next failed
   registration refreshes it by DSN/key ID while preserving node addresses.
-- Diagnostics intentionally omit DSN/address/key material, payloads, and dynamic
-  exception text. Do not paste the bootstrap file into logs or support requests.
+- Diagnostics intentionally contain only bounded reason codes and omit paths,
+  callback hosts, DSN/address/key material, property identifiers, payloads, and
+  dynamic exception text. Do not paste the bootstrap file into logs or support
+  requests.
