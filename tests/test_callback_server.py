@@ -1,5 +1,4 @@
 # ruff: noqa: I001
-import base64
 import http.client
 import json
 import socket
@@ -18,7 +17,7 @@ def test_threaded_callback_server_runs_authenticated_exchange_and_datapoint():
     router.add(device)
     protocol = AylaCallbackProtocol(
         router,
-        random_bytes=lambda size: CONTROLLER_RANDOM[:size],
+        random_bytes=lambda size: CONTROLLER_RANDOM.encode("ascii")[:size],
         time_value=lambda: 456,
         max_body=4096,
     )
@@ -30,9 +29,13 @@ def test_threaded_callback_server_runs_authenticated_exchange_and_datapoint():
     try:
         exchange_body = json.dumps(
             {
-                "key_id": "key-one",
-                "random": base64.b64encode(DEVICE_RANDOM).decode("ascii"),
-                "time": 123,
+                "key_exchange": {
+                    "ver": 1,
+                    "proto": 1,
+                    "key_id": "key-one",
+                    "random_1": DEVICE_RANDOM,
+                    "time_1": 123,
+                }
             }
         )
         connection.request(
@@ -49,8 +52,8 @@ def test_threaded_callback_server_runs_authenticated_exchange_and_datapoint():
             LAN_KEY,
             device_random=DEVICE_RANDOM,
             device_time=123,
-            controller_random=base64.b64decode(exchange["random"]),
-            controller_time=exchange["time"],
+            controller_random=exchange["random_2"],
+            controller_time=exchange["time_2"],
             max_body=4096,
         )
         connection.request(

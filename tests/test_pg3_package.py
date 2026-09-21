@@ -116,16 +116,16 @@ def test_server_manifest_is_pg3x_installable():
     assert (ROOT / manifest["install"]).is_file()
 
 
-def test_supported_pg3x_version_is_0_1_1_everywhere():
+def test_supported_pg3x_version_is_0_1_2_everywhere():
     manifest = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
 
-    assert project["project"]["version"] == "0.1.1"
-    assert apc_pg3x.__version__ == "0.1.1"
-    assert manifest["profile_version"] == "0.1.1"
-    assert {credit["version"] for credit in manifest["credits"]} == {"0.1.1"}
-    assert 'name = "apc-ph6u4x32-pg3x"\nversion = "0.1.1"' in lock
+    assert project["project"]["version"] == "0.1.2"
+    assert apc_pg3x.__version__ == "0.1.2"
+    assert manifest["profile_version"] == "0.1.2"
+    assert {credit["version"] for credit in manifest["credits"]} == {"0.1.2"}
+    assert 'name = "apc-ph6u4x32-pg3x"\nversion = "0.1.2"' in lock
 
 
 def test_bootstrap_path_is_canonical_and_not_user_editable():
@@ -237,7 +237,7 @@ def test_operator_docs_define_canonical_upload_and_truthful_lifecycle():
     assert "resurrect" in config_doc
     assert "top-level" in config_doc
     assert "Local Store purchase-option version" in config_doc
-    assert "`0.1.1`" in config_doc
+    assert "`0.1.2`" in config_doc
     assert "BOOTSTRAP_OWNER" in config_doc
     assert "CALLBACK_HOST" in config_doc
     assert "custom parameters persist only non-secret timing/network settings" in normalized_config_doc

@@ -127,17 +127,36 @@ def test_pg3_application_subscribes_and_creates_fixed_topology(monkeypatch, tmp_
     assert len([node for node in app.interface.nodes if hasattr(node, "role")]) == 6
     assert set(app.restart_data) == {"dsn", "last_address", "roles"}
     assert app.runtime.restart_state["last_address"] == "192.0.2.20"
+    assert app.runtime.polls == 1
 
     outlet = next(node for node in app.interface.nodes if getattr(node, "role", None) == "outlet_1")
     outlet.on()
     outlet.off()
     assert app.runtime.commands == [("outlet_1", True), ("outlet_1", False)]
 
-    app.poll({"shortPoll": True})
-    assert app.runtime.polls == 1
+    app.poll("shortPoll")
+    app.poll("longPoll")
+    assert app.runtime.polls == 3
+    assert app.restart_data["last_address"] == "192.0.2.20"
     app.stop()
     assert app.runtime.closed is True
     assert app.interface.calls[-1] == "stop"
+
+
+def test_pg3_application_ignores_unknown_poll_values(monkeypatch, tmp_path, fake_udi):
+    monkeypatch.setattr(pg3, "PluginRuntime", FakeRuntime)
+    app = pg3.Pg3Application(fake_udi, plugin_root=tmp_path)
+    app.configure(
+        {
+            "bootstrap_config_path": "data/apc-bootstrap.json",
+            "callback_host": "controller.local",
+        }
+    )
+
+    app.poll("unexpected")
+    app.poll({"shortPoll": True})
+
+    assert app.runtime.polls == 1
 
 
 def test_pg3_application_rejects_bootstrap_path_escape(tmp_path, fake_udi):

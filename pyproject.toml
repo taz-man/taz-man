@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "apc-ph6u4x32-pg3x"
-version = "0.1.1"
+version = "0.1.2"
 description = "Native PG3x plugin core for APC PH6U4X32 via Ayla LAN"
 requires-python = ">=3.11"
 dependencies = [

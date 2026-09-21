@@ -1,6 +1,7 @@
 # ruff: noqa: I001
 import base64
 import json
+import logging
 
 import pytest
 
@@ -10,9 +11,9 @@ from apc_pg3x.transport import ProtocolError
 from test_ayla_device import make_device
 
 
-LAN_KEY = base64.b64encode(b"0123456789abcdef0123456789abcdef").decode("ascii")
-DEVICE_RANDOM = b"device-random-16"
-CONTROLLER_RANDOM = b"controller-random"
+LAN_KEY = "fixture-lan-key-001122334455"
+DEVICE_RANDOM = "deviceRandom0001"
+CONTROLLER_RANDOM = "serverRandom0002"
 
 
 def configured_device(*, address="one.local", on_state=None):
@@ -24,7 +25,7 @@ def establish_protocol(device):
     router.add(device)
     protocol = AylaCallbackProtocol(
         router,
-        random_bytes=lambda size: CONTROLLER_RANDOM[:size],
+        random_bytes=lambda size: CONTROLLER_RANDOM.encode("ascii")[:size],
         time_value=lambda: 456,
         max_body=4096,
     )
@@ -39,8 +40,8 @@ def establish_protocol(device):
         LAN_KEY,
         device_random=DEVICE_RANDOM,
         device_time=123,
-        controller_random=response["random"],
-        controller_time=response["time"],
+        controller_random=response["random_2"],
+        controller_time=response["time_2"],
         max_body=4096,
     )
     return protocol, peer
@@ -48,35 +49,39 @@ def establish_protocol(device):
 
 def datapoint_body(peer, value, *, sequence=1):
     plaintext = json.dumps(
-        {"properties": [{"property": {"name": "outlet_1", "value": value}}]},
+        {"seq_no": sequence, "data": {"name": "outlet_1", "value": int(value)}},
         separators=(",", ":"),
     ).encode("utf-8")
-    return peer.seal_device(plaintext, sequence=sequence)
+    return peer.seal_device(plaintext)
 
 
-def test_authenticated_datapoint_is_the_only_protocol_commit_path():
+def test_authenticated_datapoint_is_the_only_protocol_commit_path(caplog):
     reports = []
     device = configured_device(on_state=lambda name, value: reports.append((name, value)))
     protocol, peer = establish_protocol(device)
 
-    protocol.receive_datapoint(
-        key_id="key-one",
-        source_address="one.local",
-        body=datapoint_body(peer, True),
-        now=2.0,
-    )
+    with caplog.at_level(logging.INFO, logger="apc_pg3x.protocol"):
+        protocol.receive_datapoint(
+            key_id="key-one",
+            source_address="one.local",
+            body=datapoint_body(peer, True),
+            now=2.0,
+        )
 
     assert device.state("outlet_1").actual is True
     assert reports == [("outlet_1", True)]
+    assert caplog.messages == [
+        "Ayla LAN diagnostic stage=AUTHENTICATED_DATAPOINT reason=ACCEPTED"
+    ]
 
 
 def test_signature_tamper_does_not_mutate_state():
     device = configured_device()
     protocol, peer = establish_protocol(device)
     envelope = json.loads(datapoint_body(peer, True))
-    signature = bytearray(base64.b64decode(envelope["signature"]))
+    signature = bytearray(base64.b64decode(envelope["sign"]))
     signature[0] ^= 1
-    envelope["signature"] = base64.b64encode(signature).decode("ascii")
+    envelope["sign"] = base64.b64encode(signature).decode("ascii")
 
     with pytest.raises(AuthenticationError, match="authentication failed"):
         protocol.receive_datapoint(
@@ -97,7 +102,7 @@ def test_replay_and_oversized_callback_are_rejected():
         key_id="key-one", source_address="one.local", body=body, now=2.0
     )
 
-    with pytest.raises(AuthenticationError, match="replay"):
+    with pytest.raises(AuthenticationError):
         protocol.receive_datapoint(
             key_id="key-one", source_address="one.local", body=body, now=3.0
         )
@@ -107,18 +112,22 @@ def test_replay_and_oversized_callback_are_rejected():
         )
 
 
-def test_command_envelope_is_per_device_and_authenticated():
+def test_command_envelope_is_per_device_and_authenticated(caplog):
     device = configured_device()
     protocol, peer = establish_protocol(device)
     device.request("outlet_1", True, now=2.0)
 
-    body = protocol.fetch_commands(
-        key_id="key-one", source_address="one.local", now=2.1
-    )
+    with caplog.at_level(logging.INFO, logger="apc_pg3x.protocol"):
+        body = protocol.fetch_commands(
+            key_id="key-one", source_address="one.local", now=2.1
+        )
     payload = json.loads(peer.open_controller(body))
 
     assert payload["data"]["properties"][0]["property"]["name"] == "outlet_1"
     assert payload["data"]["properties"][0]["property"]["value"] is True
+    assert caplog.messages == [
+        "Ayla LAN diagnostic stage=COMMAND_FETCH reason=ACCEPTED"
+    ]
 
 
 def test_device_config_repr_redacts_lan_key():
@@ -134,7 +143,7 @@ def test_invalid_key_exchange_does_not_mark_device_connected():
     router.add(device)
     protocol = AylaCallbackProtocol(
         router,
-        random_bytes=lambda size: CONTROLLER_RANDOM[:size],
+        random_bytes=lambda size: CONTROLLER_RANDOM.encode("ascii")[:size],
         time_value=lambda: 456,
     )
 
@@ -142,7 +151,7 @@ def test_invalid_key_exchange_does_not_mark_device_connected():
         protocol.key_exchange(
             key_id="key-one",
             source_address="one.local",
-            device_random=b"",
+            device_random="",
             device_time=123,
             now=1.0,
         )
@@ -154,7 +163,7 @@ def test_invalid_key_exchange_does_not_mark_device_connected():
 def test_rekey_invalidates_old_session_before_state_commit():
     device = configured_device()
     protocol, old_peer = establish_protocol(device)
-    second_random = b"second-device-rnd"
+    second_random = "secondDeviceRnd2"
     response = protocol.key_exchange(
         key_id="key-one",
         source_address="one.local",
@@ -166,8 +175,8 @@ def test_rekey_invalidates_old_session_before_state_commit():
         LAN_KEY,
         device_random=second_random,
         device_time=124,
-        controller_random=response["random"],
-        controller_time=response["time"],
+        controller_random=response["random_2"],
+        controller_time=response["time_2"],
         max_body=4096,
     )
 
@@ -189,16 +198,37 @@ def test_rekey_invalidates_old_session_before_state_commit():
     assert device.state("outlet_1").actual is True
 
 
-def test_authenticated_malformed_payload_does_not_consume_sequence():
+def test_authenticated_malformed_payload_advances_cbc_without_committing_state():
     device = configured_device()
     protocol, peer = establish_protocol(device)
-    malformed = peer.seal_device(b"{}", sequence=1)
+    malformed = peer.seal_device(b'{"seq_no":1,"data":{}}')
 
     with pytest.raises(ProtocolError, match="malformed datapoint"):
         protocol.receive_datapoint(
             key_id="key-one",
             source_address="one.local",
             body=malformed,
+            now=2.0,
+        )
+
+    protocol.receive_datapoint(
+        key_id="key-one",
+        source_address="one.local",
+        body=datapoint_body(peer, True, sequence=2),
+        now=2.1,
+    )
+    assert device.state("outlet_1").actual is True
+
+
+def test_authenticated_payload_without_sequence_advances_cbc_for_next_message():
+    device = configured_device()
+    protocol, peer = establish_protocol(device)
+
+    with pytest.raises(AuthenticationError, match="malformed authenticated payload"):
+        protocol.receive_datapoint(
+            key_id="key-one",
+            source_address="one.local",
+            body=peer.seal_device(b'{"data":{}}'),
             now=2.0,
         )
 
@@ -217,7 +247,7 @@ def test_stale_session_source_does_not_make_reassigned_ip_ambiguous():
     router.add(first)
     protocol = AylaCallbackProtocol(
         router,
-        random_bytes=lambda size: CONTROLLER_RANDOM[:size],
+        random_bytes=lambda size: CONTROLLER_RANDOM.encode("ascii")[:size],
         time_value=lambda: 456,
     )
     protocol.key_exchange(
@@ -239,7 +269,7 @@ def test_stale_session_source_does_not_make_reassigned_ip_ambiguous():
     protocol.key_exchange(
         key_id="key-two",
         source_address="shared.local",
-        device_random=b"second-device-rnd",
+        device_random="secondDeviceRnd2",
         device_time=124,
         now=2.0,
     )

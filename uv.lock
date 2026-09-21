@@ -4,7 +4,7 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "apc-ph6u4x32-pg3x"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "pycryptodome" },

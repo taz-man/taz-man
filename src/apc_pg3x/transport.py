@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from queue import Empty, Queue
 from threading import Thread
 from typing import Protocol
@@ -65,14 +64,15 @@ class AylaLanTransport:
             outcome = result.get(timeout=self.request_timeout)
         except Empty:
             self._close_http()
-            _LOGGER.warning("Ayla LAN registration exceeded its request deadline")
+            _LOGGER.warning("Ayla LAN diagnostic stage=REGISTRATION reason=DEADLINE")
             raise ProtocolError("registration failed") from None
         if outcome == "transport":
-            _LOGGER.warning("Ayla LAN registration failed due to a transport error")
+            _LOGGER.warning("Ayla LAN diagnostic stage=REGISTRATION reason=TRANSPORT")
             raise ProtocolError("registration failed")
-        if outcome == "malformed":
-            _LOGGER.warning("Ayla LAN registration returned an invalid response shape")
-            raise ProtocolError("malformed registration response")
+        if outcome == "rejected":
+            _LOGGER.warning("Ayla LAN diagnostic stage=REGISTRATION reason=REJECTED")
+            raise ProtocolError("registration rejected")
+        _LOGGER.info("Ayla LAN diagnostic stage=REGISTRATION reason=ACCEPTED")
 
     def _perform_registration(
         self, url: str, payload: object, result: Queue[str]
@@ -83,16 +83,13 @@ class AylaLanTransport:
                 json=payload,
                 timeout=(self.request_timeout, self.request_timeout),
             )
-            response.raise_for_status()
+            if response.status_code != 202:
+                result.put("rejected")
+                return
         except Exception:  # noqa: BLE001 - report only a sanitized outcome
             result.put("transport")
             return
-        try:
-            body = response.json()
-        except Exception:  # noqa: BLE001 - report only a sanitized outcome
-            result.put("malformed")
-            return
-        result.put("success" if self._valid_registration(body) else "malformed")
+        result.put("success")
 
     def _close_http(self) -> None:
         close = getattr(self._http, "close", None)
@@ -102,10 +99,3 @@ class AylaLanTransport:
             close()
         except Exception:  # noqa: BLE001 - never expose close failure details
             return
-
-    @staticmethod
-    def _valid_registration(body: object) -> bool:
-        if not isinstance(body, Mapping):
-            return False
-        registration = body.get("local_reg")
-        return isinstance(registration, Mapping) and registration.get("status") == "success"

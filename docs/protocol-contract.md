@@ -22,10 +22,10 @@ These fields are secret-bearing or identifying and must be redacted from logs. A
 ## LAN registration and callback flow
 
 1. The controller runs a LAN-reachable HTTP callback server, default port `10275`.
-2. It registers with `POST http://<device>/local_reg.json`, sending a local registration object containing callback IP, port, URI `/local_lan`, and a `notify` flag.
+2. It registers with `POST http://<device>/local_reg.json`, sending a local registration object containing callback IP, port, URI `/local_lan`, and a `notify` flag. The observed device success response is HTTP `202 Accepted`; no JSON success object is required.
 3. `notify=0` renews registration. `notify=1` indicates queued command data.
-4. The device initiates `POST /local_lan/key_exchange.json` to the controller with key ID, device random value, and device time value.
-5. The controller matches key ID to exactly one configured device, generates a controller random/time pair, derives directional signing/encryption material, and returns the controller random/time pair.
+4. The device initiates `POST /local_lan/key_exchange.json` to the controller with a nested `key_exchange` object containing `ver=1`, `proto=1`, `key_id`, a 16-character `random_1`, and microsecond epoch `time_1`.
+5. The controller matches key ID to exactly one configured device, generates a 16-character `random_2` and microsecond epoch `time_2`, derives directional signing/encryption material, and returns top-level `random_2` and `time_2` fields.
 6. The device retrieves queued work with `GET /local_lan/commands.json`.
 7. The device sends property telemetry to `POST /local_lan/property/datapoint.json` as encrypted and signed content.
 
@@ -73,7 +73,8 @@ A literal address may be accepted as a temporary hint, not permanent identity.
 
 ## Cryptographic requirements
 
-- Derive separate controller-to-device and device-to-controller signing, AES key, and IV material from the shared LAN key plus both random/time pairs and direction discriminator.
+- Treat the LAN key as its UTF-8 wire string. For each direction concatenate the ordered random pair, decimal time pair, and discriminator (`0` signing, `1` AES, `2` IV), then apply the observed double-HMAC-SHA256 construction. Reverse both randoms and times for device-to-controller material.
+- Send only base64 `enc` and `sign` fields. Sign the unpadded plaintext with HMAC-SHA256, zero-pad only to the next AES block boundary (no extra block when aligned), and maintain continuous CBC state independently in each direction.
 - Verify HMAC before accepting any decrypted datapoint.
 - Reject invalid base64, invalid block length, unknown key IDs, replay/out-of-sequence traffic where observable, and signature mismatch.
 - Never log raw keys, derived keys, random/time tuples together, encrypted payloads containing user metadata, or decrypted sensitive payloads.
@@ -88,11 +89,11 @@ A literal address may be accepted as a temporary hint, not permanent identity.
 
 ## Testable assumptions and unknowns
 
-1. **Signature input:** assumed to be the unpadded plaintext for each message. Validate with sanitized traffic before hardware acceptance.
-2. **CBC continuity:** existing behavior suggests directional cipher state may continue across messages. Test both continuous-session and per-message reinitialization against the device.
-3. **Sequence enforcement:** a monotonically increasing command sequence is observed; device rejection/replay behavior is not yet proven.
-4. **Readback mechanism:** unsolicited datapoints are observed. A complete all-property read request is not yet proven; query may need re-registration/notify plus cached-state freshness rules.
-5. **Property names:** must be imported from the user's device metadata; fixed ordering is prohibited.
-6. **IP rediscovery:** mDNS/broadcast capability is unknown. The fallback is a protected metadata refresh, not permanent reliance on a stale IP.
+1. **Sequence enforcement:** a monotonically increasing command sequence is observed; device rejection/replay behavior is not yet proven.
+2. **Readback mechanism:** unsolicited datapoints are observed. A complete all-property read request is not yet proven; query may need re-registration/notify plus cached-state freshness rules.
+3. **Property names:** must be imported from the user's device metadata; fixed ordering is prohibited.
+4. **IP rediscovery:** mDNS/broadcast capability is unknown. The fallback is a protected metadata refresh, not permanent reliance on a stale IP.
 
 Each assumption must be resolved with sanitized fixtures or an explicitly approved noncritical hardware test before local-store acceptance.
+
+The wire-format tests use synthetic known-answer values independently derived from the public Ayla protocol description and implementation at upstream commit `513c71157d5c03b89bab04b3ad3b6c2de8fd20b9`. Production code is independently authored and contains no copied upstream source.

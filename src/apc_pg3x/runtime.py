@@ -155,7 +155,7 @@ class PluginRuntime:
         self.protocol = AylaCallbackProtocol(
             self.router,
             random_bytes=os.urandom,
-            time_value=lambda: int(time.time()),
+            time_value=lambda: int(time.time() * 1_000_000),
         )
         self.callback_server = AylaCallbackServer(
             self.protocol,

@@ -6,8 +6,8 @@ identity, current LAN address, six discovered Boolean property mappings, and
 Ayla LAN key material. Configure the Local Store **Persistent Folder** as
 `data`. Do not use **Plugin Custom Data** (`nsdata`/`CUSTOMNS`) for this
 per-install secret, and do not enter a bootstrap path as a custom parameter.
-Set the Local Store purchase-option version to `0.1.1`; a same-version reinstall
-does not distinguish this corrected runtime from the prior `0.1.0` build.
+Set the Local Store purchase-option version to `0.1.2`; a same-version reinstall
+does not distinguish this corrected runtime from the prior `0.1.1` build.
 
 ## PG3x ZIP upload layout
 

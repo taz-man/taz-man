@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from apc_pg3x import config as config_module
+from apc_pg3x import runtime as runtime_module
 from apc_pg3x.config import (
     EXPECTED_ROLES,
     BootstrapConfigStore,
@@ -108,6 +109,25 @@ def make_runtime(tmp_path, *, transport=None, clock=None, timeout=8.0):
         start_callback=False,
     )
     return runtime, publisher, path
+
+
+def test_runtime_key_exchange_uses_epoch_microseconds(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 1700000000.125)
+    monkeypatch.setattr(runtime_module.os, "urandom", lambda size: bytes(range(size)))
+    runtime, _publisher, _path = make_runtime(tmp_path)
+
+    response = runtime.protocol.key_exchange(
+        key_id="key-1",
+        source_address="192.0.2.10",
+        device_random="deviceRandom0001",
+        device_time=1700000000123456,
+        now=10.0,
+    )
+
+    assert response["time_2"] == 1700000000125000
+    assert len(response["random_2"]) == 16
+    assert response["random_2"].isascii()
+    assert response["random_2"].isalnum()
 
 
 def test_bootstrap_requires_exactly_six_named_roles_and_redacts_key(tmp_path):

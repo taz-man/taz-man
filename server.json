@@ -10,7 +10,7 @@
   "longPoll": "300",
   "testMode": false,
   "logLevel": "INFO",
-  "profile_version": "0.1.1",
+  "profile_version": "0.1.2",
   "customParams": {
     "callback_host": "",
     "callback_port": "10275",
@@ -21,7 +21,7 @@
     {
       "title": "APC PH6U4X32 PG3x Plugin",
       "author": "Local proof of concept",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "date": "September 20, 2026",
       "source": "https://github.com/tazzm/APC-PG3x",
       "license": "https://github.com/tazzm/APC-PG3x/blob/main/LICENSE"

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
+import logging
 import socket
 import time
 from collections.abc import Callable
@@ -14,6 +13,18 @@ from threading import BoundedSemaphore, Thread, Timer
 from .device import RoutingError
 from .protocol import AuthenticationError, AylaCallbackProtocol
 from .transport import ProtocolError
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _diagnostic_stage(path: str) -> str:
+    if path == "/local_lan/key_exchange.json":
+        return "KEY_EXCHANGE"
+    if path == "/local_lan/property/datapoint.json":
+        return "AUTHENTICATED_DATAPOINT"
+    if path == "/local_lan/commands.json":
+        return "COMMAND_FETCH"
+    return "CALLBACK"
 
 
 class AylaCallbackServer:
@@ -131,18 +142,12 @@ class AylaCallbackServer:
                 response = self._protocol.key_exchange(
                     key_id=request["key_id"],
                     source_address=source,
-                    device_random=request["random"],
-                    device_time=request["time"],
+                    device_random=request["random_1"],
+                    device_time=request["time_1"],
                     now=self._clock(),
                 )
-                self._json_response(
-                    handler,
-                    200,
-                    {
-                        "random": base64.b64encode(response["random"]).decode("ascii"),
-                        "time": response["time"],
-                    },
-                )
+                _LOGGER.info("Ayla LAN diagnostic stage=KEY_EXCHANGE reason=ACCEPTED")
+                self._json_response(handler, 200, response)
                 return
             if handler.path == "/local_lan/property/datapoint.json":
                 key_id = self._protocol.key_id_for_source(source)
@@ -155,7 +160,20 @@ class AylaCallbackServer:
                 self._json_response(handler, 200, {"status": "success"})
                 return
             self._json_response(handler, 404, {"error": "not found"})
-        except (AuthenticationError, ProtocolError, RoutingError, ValueError, TypeError):
+        except RoutingError:
+            _LOGGER.warning("Ayla LAN diagnostic stage=SOURCE_ROUTING reason=REJECTED")
+            self._json_response(handler, 400, {"error": "invalid request"})
+        except AuthenticationError:
+            _LOGGER.warning(
+                "Ayla LAN diagnostic stage=%s reason=AUTHENTICATION_REJECTED",
+                _diagnostic_stage(handler.path),
+            )
+            self._json_response(handler, 400, {"error": "invalid request"})
+        except (ProtocolError, ValueError, TypeError):
+            _LOGGER.warning(
+                "Ayla LAN diagnostic stage=%s reason=MALFORMED",
+                _diagnostic_stage(handler.path),
+            )
             self._json_response(handler, 400, {"error": "invalid request"})
 
     def _get(self, handler: BaseHTTPRequestHandler) -> None:
@@ -203,18 +221,34 @@ class AylaCallbackServer:
     def _parse_key_exchange(body: bytes) -> dict[str, object]:
         try:
             payload = json.loads(body)
-            key_id = payload["key_id"]
-            encoded_random = payload["random"]
-            device_time = payload["time"]
+            if not isinstance(payload, dict) or set(payload) != {"key_exchange"}:
+                raise ValueError
+            exchange = payload["key_exchange"]
+            if not isinstance(exchange, dict) or set(exchange) != {
+                "ver",
+                "proto",
+                "key_id",
+                "random_1",
+                "time_1",
+            }:
+                raise ValueError
+            key_id = exchange["key_id"]
+            random_value = exchange["random_1"]
+            device_time = exchange["time_1"]
+            if exchange["ver"] != 1 or exchange["proto"] != 1:
+                raise ValueError
             if not isinstance(key_id, str) or not key_id:
                 raise ValueError
-            if not isinstance(encoded_random, str) or type(device_time) is not int:
+            if (
+                not isinstance(random_value, str)
+                or len(random_value) != 16
+                or not random_value.isalnum()
+                or type(device_time) is not int
+                or not 0 <= device_time < 2**63
+            ):
                 raise ValueError
-            random_value = base64.b64decode(encoded_random, validate=True)
-            if not random_value:
-                raise ValueError
-            return {"key_id": key_id, "random": random_value, "time": device_time}
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError, binascii.Error):
+            return {"key_id": key_id, "random_1": random_value, "time_1": device_time}
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             raise ProtocolError("malformed key exchange") from None
 
     @classmethod

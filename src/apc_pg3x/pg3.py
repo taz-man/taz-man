@@ -151,6 +151,7 @@ class Pg3Application:
         self.restart_data.clear()
         self.restart_data.update(runtime.public_restart_state())
         self.interface.Notices.pop("configuration", None)
+        runtime.poll()
 
     def _reject_configuration(self, reason: RejectionReason) -> None:
         self.interface.Notices["configuration"] = f"Configuration rejected [{reason.value}]."
@@ -162,11 +163,9 @@ class Pg3Application:
     def poll(self, poll_type: object) -> None:
         if self.runtime is None:
             return
-        if isinstance(poll_type, dict) and (
-            "shortPoll" in poll_type or "longPoll" in poll_type
-        ):
+        if poll_type in ("shortPoll", "longPoll"):
             self.runtime.poll()
-            if "longPoll" in poll_type:
+            if poll_type == "longPoll":
                 self.restart_data["last_address"] = self.runtime.device.address
 
     def stop(self, *_args: object) -> None:
